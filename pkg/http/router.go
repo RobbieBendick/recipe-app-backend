@@ -8,8 +8,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/go-chi/cors"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/robbi/recipe-app-backend/internal/config"
-	"github.com/robbi/recipe-app-backend/internal/http/handlers"
+	"github.com/robbi/recipe-app-backend/pkg/config"
+	"github.com/robbi/recipe-app-backend/pkg/http/handlers"
 )
 
 func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {

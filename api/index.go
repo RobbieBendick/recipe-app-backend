@@ -6,9 +6,9 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/robbi/recipe-app-backend/internal/config"
-	"github.com/robbi/recipe-app-backend/internal/db"
-	httpserver "github.com/robbi/recipe-app-backend/internal/http"
+	"github.com/robbi/recipe-app-backend/pkg/config"
+	"github.com/robbi/recipe-app-backend/pkg/db"
+	httpserver "github.com/robbi/recipe-app-backend/pkg/http"
 )
 
 var (

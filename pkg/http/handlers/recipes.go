@@ -4,7 +4,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/robbi/recipe-app-backend/internal/db"
+	"github.com/robbi/recipe-app-backend/pkg/db"
 )
 
 func (a *API) ListRecipes(w http.ResponseWriter, r *http.Request) {
