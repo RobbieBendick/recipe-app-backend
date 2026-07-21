@@ -1,8 +1,22 @@
--- recipes + shopping lists + pantry for recipe-app
+-- recipes + shopping lists + pantry for recipe-app (per-user)
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+CREATE TABLE IF NOT EXISTS users (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	email TEXT NOT NULL,
+	password_hash TEXT,
+	google_sub TEXT,
+	name TEXT NOT NULL DEFAULT '',
+	avatar_url TEXT NOT NULL DEFAULT '',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT users_email_unique UNIQUE (email),
+	CONSTRAINT users_google_sub_unique UNIQUE (google_sub)
+);
 
 CREATE TABLE IF NOT EXISTS recipes (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 	title TEXT NOT NULL,
 	description TEXT NOT NULL DEFAULT '',
 	emoji TEXT NOT NULL DEFAULT '',
@@ -12,17 +26,14 @@ CREATE TABLE IF NOT EXISTS recipes (
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-ALTER TABLE recipes ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '';
-
 CREATE TABLE IF NOT EXISTS shopping_lists (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 	title TEXT NOT NULL,
 	emoji TEXT NOT NULL DEFAULT '🛒',
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
-ALTER TABLE shopping_lists ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '🛒';
 
 CREATE TABLE IF NOT EXISTS shopping_list_items (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -36,6 +47,7 @@ CREATE TABLE IF NOT EXISTS shopping_list_items (
 
 CREATE TABLE IF NOT EXISTS pantry_items (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 	name TEXT NOT NULL,
 	emoji TEXT NOT NULL DEFAULT '',
 	notes TEXT NOT NULL DEFAULT '',
@@ -46,10 +58,64 @@ CREATE TABLE IF NOT EXISTS pantry_items (
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- One-time: wipe shared pre-auth data and attach ownership columns.
+DO $$
+BEGIN
+	-- recipes
+	IF EXISTS (
+		SELECT 1 FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_name = 'recipes'
+	) AND NOT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'recipes' AND column_name = 'user_id'
+	) THEN
+		TRUNCATE TABLE shopping_list_items, shopping_lists, recipes CASCADE;
+		ALTER TABLE recipes
+			ADD COLUMN user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE;
+	END IF;
+
+	-- shopping_lists
+	IF EXISTS (
+		SELECT 1 FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_name = 'shopping_lists'
+	) AND NOT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'shopping_lists' AND column_name = 'user_id'
+	) THEN
+		TRUNCATE TABLE shopping_list_items, shopping_lists CASCADE;
+		ALTER TABLE shopping_lists
+			ADD COLUMN user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE;
+	END IF;
+
+	-- pantry_items
+	IF EXISTS (
+		SELECT 1 FROM information_schema.tables
+		WHERE table_schema = 'public' AND table_name = 'pantry_items'
+	) AND NOT EXISTS (
+		SELECT 1 FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = 'pantry_items' AND column_name = 'user_id'
+	) THEN
+		TRUNCATE TABLE pantry_items CASCADE;
+		ALTER TABLE pantry_items
+			ADD COLUMN user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE;
+	END IF;
+END $$;
+
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '';
+ALTER TABLE shopping_lists ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '🛒';
 ALTER TABLE pantry_items ADD COLUMN IF NOT EXISTS percent INTEGER NOT NULL DEFAULT 100;
 
 CREATE INDEX IF NOT EXISTS shopping_list_items_list_id_idx
 	ON shopping_list_items (list_id);
+
+CREATE INDEX IF NOT EXISTS recipes_user_id_updated_at_idx
+	ON recipes (user_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS shopping_lists_user_id_updated_at_idx
+	ON shopping_lists (user_id, updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS pantry_items_user_id_sort_order_idx
+	ON pantry_items (user_id, sort_order ASC, name ASC);
 
 CREATE INDEX IF NOT EXISTS recipes_updated_at_idx
 	ON recipes (updated_at DESC);

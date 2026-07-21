@@ -8,7 +8,11 @@ import (
 )
 
 func (a *API) ListShoppingLists(w http.ResponseWriter, r *http.Request) {
-	lists, err := db.ListShoppingLists(r.Context(), a.DB)
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	lists, err := db.ListShoppingLists(r.Context(), a.DB, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list shopping lists")
 		return
@@ -17,8 +21,12 @@ func (a *API) ListShoppingLists(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) GetShoppingList(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
-	list, err := db.GetShoppingList(r.Context(), a.DB, id)
+	list, err := db.GetShoppingList(r.Context(), a.DB, userID, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load shopping list")
 		return
@@ -31,6 +39,10 @@ func (a *API) GetShoppingList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) CreateShoppingList(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	var in db.ShoppingListInput
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -45,7 +57,7 @@ func (a *API) CreateShoppingList(w http.ResponseWriter, r *http.Request) {
 		in.Items = []string{}
 	}
 
-	list, err := db.CreateShoppingList(r.Context(), a.DB, in)
+	list, err := db.CreateShoppingList(r.Context(), a.DB, userID, in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create shopping list")
 		return
@@ -54,6 +66,10 @@ func (a *API) CreateShoppingList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) UpdateShoppingList(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var in db.ShoppingListInput
 	if err := decodeJSON(r, &in); err != nil {
@@ -69,7 +85,7 @@ func (a *API) UpdateShoppingList(w http.ResponseWriter, r *http.Request) {
 		in.Items = []string{}
 	}
 
-	list, err := db.UpdateShoppingList(r.Context(), a.DB, id, in)
+	list, err := db.UpdateShoppingList(r.Context(), a.DB, userID, id, in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update shopping list")
 		return
@@ -82,13 +98,17 @@ func (a *API) UpdateShoppingList(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) DeleteShoppingList(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
-	ok, err := db.DeleteShoppingList(r.Context(), a.DB, id)
+	okDel, err := db.DeleteShoppingList(r.Context(), a.DB, userID, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete shopping list")
 		return
 	}
-	if !ok {
+	if !okDel {
 		writeError(w, http.StatusNotFound, "shopping list not found")
 		return
 	}
@@ -100,6 +120,10 @@ type addItemBody struct {
 }
 
 func (a *API) AddShoppingListItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	listID := chi.URLParam(r, "id")
 	var body addItemBody
 	if err := decodeJSON(r, &body); err != nil {
@@ -112,7 +136,7 @@ func (a *API) AddShoppingListItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := db.AddShoppingListItem(r.Context(), a.DB, listID, body.Text)
+	list, err := db.AddShoppingListItem(r.Context(), a.DB, userID, listID, body.Text)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to add item")
 		return
@@ -125,9 +149,13 @@ func (a *API) AddShoppingListItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) ToggleShoppingListItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	listID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemId")
-	list, err := db.ToggleShoppingListItem(r.Context(), a.DB, listID, itemID)
+	list, err := db.ToggleShoppingListItem(r.Context(), a.DB, userID, listID, itemID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to toggle item")
 		return
@@ -140,9 +168,13 @@ func (a *API) ToggleShoppingListItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) RemoveShoppingListItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	listID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemId")
-	list, err := db.RemoveShoppingListItem(r.Context(), a.DB, listID, itemID)
+	list, err := db.RemoveShoppingListItem(r.Context(), a.DB, userID, listID, itemID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to remove item")
 		return
@@ -158,9 +190,11 @@ type addRecipeBody struct {
 	RecipeID string `json:"recipeId"`
 }
 
-// AddRecipeToList appends a recipe's ingredients onto an existing shopping list
-// (the "drag recipe onto list" workflow).
 func (a *API) AddRecipeToList(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	listID := chi.URLParam(r, "id")
 	var body addRecipeBody
 	if err := decodeJSON(r, &body); err != nil {
@@ -173,7 +207,7 @@ func (a *API) AddRecipeToList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list, err := db.AddRecipeToShoppingList(r.Context(), a.DB, listID, body.RecipeID)
+	list, err := db.AddRecipeToShoppingList(r.Context(), a.DB, userID, listID, body.RecipeID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to add recipe to list")
 		return

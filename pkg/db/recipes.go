@@ -52,12 +52,13 @@ type ShoppingListInput struct {
 	SourceRecipeID *string  `json:"sourceRecipeId,omitempty"`
 }
 
-func ListRecipes(ctx context.Context, pool *pgxpool.Pool) ([]Recipe, error) {
+func ListRecipes(ctx context.Context, pool *pgxpool.Pool, userID string) ([]Recipe, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, title, description, emoji, ingredients, steps, created_at, updated_at
 		FROM recipes
+		WHERE user_id = $1
 		ORDER BY updated_at DESC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -77,12 +78,12 @@ func ListRecipes(ctx context.Context, pool *pgxpool.Pool) ([]Recipe, error) {
 	return out, rows.Err()
 }
 
-func GetRecipe(ctx context.Context, pool *pgxpool.Pool, id string) (*Recipe, error) {
+func GetRecipe(ctx context.Context, pool *pgxpool.Pool, userID, id string) (*Recipe, error) {
 	row := pool.QueryRow(ctx, `
 		SELECT id, title, description, emoji, ingredients, steps, created_at, updated_at
 		FROM recipes
-		WHERE id = $1
-	`, id)
+		WHERE id = $1 AND user_id = $2
+	`, id, userID)
 	r, err := scanRecipe(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -93,12 +94,12 @@ func GetRecipe(ctx context.Context, pool *pgxpool.Pool, id string) (*Recipe, err
 	return &r, nil
 }
 
-func CreateRecipe(ctx context.Context, pool *pgxpool.Pool, in RecipeInput) (*Recipe, error) {
+func CreateRecipe(ctx context.Context, pool *pgxpool.Pool, userID string, in RecipeInput) (*Recipe, error) {
 	row := pool.QueryRow(ctx, `
-		INSERT INTO recipes (title, description, emoji, ingredients, steps)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO recipes (user_id, title, description, emoji, ingredients, steps)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, title, description, emoji, ingredients, steps, created_at, updated_at
-	`, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps)
+	`, userID, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps)
 	r, err := scanRecipe(row)
 	if err != nil {
 		return nil, err
@@ -106,18 +107,18 @@ func CreateRecipe(ctx context.Context, pool *pgxpool.Pool, in RecipeInput) (*Rec
 	return &r, nil
 }
 
-func UpdateRecipe(ctx context.Context, pool *pgxpool.Pool, id string, in RecipeInput) (*Recipe, error) {
+func UpdateRecipe(ctx context.Context, pool *pgxpool.Pool, userID, id string, in RecipeInput) (*Recipe, error) {
 	row := pool.QueryRow(ctx, `
 		UPDATE recipes
-		SET title = $2,
-			description = $3,
-			emoji = $4,
-			ingredients = $5,
-			steps = $6,
+		SET title = $3,
+			description = $4,
+			emoji = $5,
+			ingredients = $6,
+			steps = $7,
 			updated_at = now()
-		WHERE id = $1
+		WHERE id = $1 AND user_id = $2
 		RETURNING id, title, description, emoji, ingredients, steps, created_at, updated_at
-	`, id, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps)
+	`, id, userID, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps)
 	r, err := scanRecipe(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -128,8 +129,8 @@ func UpdateRecipe(ctx context.Context, pool *pgxpool.Pool, id string, in RecipeI
 	return &r, nil
 }
 
-func DeleteRecipe(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
-	tag, err := pool.Exec(ctx, `DELETE FROM recipes WHERE id = $1`, id)
+func DeleteRecipe(ctx context.Context, pool *pgxpool.Pool, userID, id string) (bool, error) {
+	tag, err := pool.Exec(ctx, `DELETE FROM recipes WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return false, err
 	}
@@ -159,12 +160,13 @@ func scanRecipe(row scannable) (Recipe, error) {
 	return r, nil
 }
 
-func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool) ([]ShoppingList, error) {
+func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool, userID string) ([]ShoppingList, error) {
 	rows, err := pool.Query(ctx, `
 		SELECT id, title, emoji, created_at, updated_at
 		FROM shopping_lists
+		WHERE user_id = $1
 		ORDER BY updated_at DESC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -189,13 +191,13 @@ func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool) ([]ShoppingList,
 	return out, rows.Err()
 }
 
-func GetShoppingList(ctx context.Context, pool *pgxpool.Pool, id string) (*ShoppingList, error) {
+func GetShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string) (*ShoppingList, error) {
 	var list ShoppingList
 	err := pool.QueryRow(ctx, `
 		SELECT id, title, emoji, created_at, updated_at
 		FROM shopping_lists
-		WHERE id = $1
-	`, id).Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt)
+		WHERE id = $1 AND user_id = $2
+	`, id, userID).Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -210,7 +212,7 @@ func GetShoppingList(ctx context.Context, pool *pgxpool.Pool, id string) (*Shopp
 	return &list, nil
 }
 
-func CreateShoppingList(ctx context.Context, pool *pgxpool.Pool, in ShoppingListInput) (*ShoppingList, error) {
+func CreateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID string, in ShoppingListInput) (*ShoppingList, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -224,10 +226,10 @@ func CreateShoppingList(ctx context.Context, pool *pgxpool.Pool, in ShoppingList
 
 	var list ShoppingList
 	err = tx.QueryRow(ctx, `
-		INSERT INTO shopping_lists (title, emoji)
-		VALUES ($1, $2)
+		INSERT INTO shopping_lists (user_id, title, emoji)
+		VALUES ($1, $2, $3)
 		RETURNING id, title, emoji, created_at, updated_at
-	`, in.Title, emoji).Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt)
+	`, userID, in.Title, emoji).Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -245,10 +247,10 @@ func CreateShoppingList(ctx context.Context, pool *pgxpool.Pool, in ShoppingList
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return GetShoppingList(ctx, pool, list.ID)
+	return GetShoppingList(ctx, pool, userID, list.ID)
 }
 
-func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, id string, in ShoppingListInput) (*ShoppingList, error) {
+func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string, in ShoppingListInput) (*ShoppingList, error) {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -262,9 +264,9 @@ func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, id string, in S
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE shopping_lists
-		SET title = $2, emoji = $3, updated_at = now()
-		WHERE id = $1
-	`, id, in.Title, emoji)
+		SET title = $3, emoji = $4, updated_at = now()
+		WHERE id = $1 AND user_id = $2
+	`, id, userID, in.Title, emoji)
 	if err != nil {
 		return nil, err
 	}
@@ -289,18 +291,30 @@ func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, id string, in S
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
-	return GetShoppingList(ctx, pool, id)
+	return GetShoppingList(ctx, pool, userID, id)
 }
 
-func DeleteShoppingList(ctx context.Context, pool *pgxpool.Pool, id string) (bool, error) {
-	tag, err := pool.Exec(ctx, `DELETE FROM shopping_lists WHERE id = $1`, id)
+func DeleteShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string) (bool, error) {
+	tag, err := pool.Exec(ctx, `DELETE FROM shopping_lists WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
 }
 
-func ToggleShoppingListItem(ctx context.Context, pool *pgxpool.Pool, listID, itemID string) (*ShoppingList, error) {
+func ownsList(ctx context.Context, pool *pgxpool.Pool, userID, listID string) (bool, error) {
+	var exists bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM shopping_lists WHERE id = $1 AND user_id = $2)
+	`, listID, userID).Scan(&exists)
+	return exists, err
+}
+
+func ToggleShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, listID, itemID string) (*ShoppingList, error) {
+	ok, err := ownsList(ctx, pool, userID, listID)
+	if err != nil || !ok {
+		return nil, err
+	}
 	tag, err := pool.Exec(ctx, `
 		UPDATE shopping_list_items
 		SET checked = NOT checked
@@ -312,13 +326,18 @@ func ToggleShoppingListItem(ctx context.Context, pool *pgxpool.Pool, listID, ite
 	if tag.RowsAffected() == 0 {
 		return nil, nil
 	}
-	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1`, listID)
-	return GetShoppingList(ctx, pool, listID)
+	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1 AND user_id = $2`, listID, userID)
+	return GetShoppingList(ctx, pool, userID, listID)
 }
 
-func AddShoppingListItem(ctx context.Context, pool *pgxpool.Pool, listID, text string) (*ShoppingList, error) {
+func AddShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, listID, text string) (*ShoppingList, error) {
+	ok, err := ownsList(ctx, pool, userID, listID)
+	if err != nil || !ok {
+		return nil, err
+	}
+
 	var maxOrder *int
-	err := pool.QueryRow(ctx, `
+	err = pool.QueryRow(ctx, `
 		SELECT MAX(sort_order) FROM shopping_list_items WHERE list_id = $1
 	`, listID).Scan(&maxOrder)
 	if err != nil {
@@ -329,22 +348,22 @@ func AddShoppingListItem(ctx context.Context, pool *pgxpool.Pool, listID, text s
 		next = *maxOrder + 1
 	}
 
-	tag, err := pool.Exec(ctx, `
+	_, err = pool.Exec(ctx, `
 		INSERT INTO shopping_list_items (list_id, text, sort_order)
-		SELECT $1, $2, $3
-		WHERE EXISTS (SELECT 1 FROM shopping_lists WHERE id = $1)
+		VALUES ($1, $2, $3)
 	`, listID, text, next)
 	if err != nil {
 		return nil, err
 	}
-	if tag.RowsAffected() == 0 {
-		return nil, nil
-	}
-	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1`, listID)
-	return GetShoppingList(ctx, pool, listID)
+	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1 AND user_id = $2`, listID, userID)
+	return GetShoppingList(ctx, pool, userID, listID)
 }
 
-func RemoveShoppingListItem(ctx context.Context, pool *pgxpool.Pool, listID, itemID string) (*ShoppingList, error) {
+func RemoveShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, listID, itemID string) (*ShoppingList, error) {
+	ok, err := ownsList(ctx, pool, userID, listID)
+	if err != nil || !ok {
+		return nil, err
+	}
 	tag, err := pool.Exec(ctx, `
 		DELETE FROM shopping_list_items WHERE id = $1 AND list_id = $2
 	`, itemID, listID)
@@ -354,12 +373,12 @@ func RemoveShoppingListItem(ctx context.Context, pool *pgxpool.Pool, listID, ite
 	if tag.RowsAffected() == 0 {
 		return nil, nil
 	}
-	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1`, listID)
-	return GetShoppingList(ctx, pool, listID)
+	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1 AND user_id = $2`, listID, userID)
+	return GetShoppingList(ctx, pool, userID, listID)
 }
 
-func CreateShoppingListFromRecipe(ctx context.Context, pool *pgxpool.Pool, recipeID string) (*ShoppingList, error) {
-	recipe, err := GetRecipe(ctx, pool, recipeID)
+func CreateShoppingListFromRecipe(ctx context.Context, pool *pgxpool.Pool, userID, recipeID string) (*ShoppingList, error) {
+	recipe, err := GetRecipe(ctx, pool, userID, recipeID)
 	if err != nil || recipe == nil {
 		return nil, err
 	}
@@ -368,7 +387,7 @@ func CreateShoppingListFromRecipe(ctx context.Context, pool *pgxpool.Pool, recip
 	if emoji == "" {
 		emoji = "🛒"
 	}
-	return CreateShoppingList(ctx, pool, ShoppingListInput{
+	return CreateShoppingList(ctx, pool, userID, ShoppingListInput{
 		Title:          "Shop: " + recipe.Title,
 		Emoji:          emoji,
 		Items:          recipe.Ingredients,
@@ -376,13 +395,13 @@ func CreateShoppingListFromRecipe(ctx context.Context, pool *pgxpool.Pool, recip
 	})
 }
 
-func AddRecipeToShoppingList(ctx context.Context, pool *pgxpool.Pool, listID, recipeID string) (*ShoppingList, error) {
-	recipe, err := GetRecipe(ctx, pool, recipeID)
+func AddRecipeToShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, listID, recipeID string) (*ShoppingList, error) {
+	recipe, err := GetRecipe(ctx, pool, userID, recipeID)
 	if err != nil || recipe == nil {
 		return nil, err
 	}
 
-	list, err := GetShoppingList(ctx, pool, listID)
+	list, err := GetShoppingList(ctx, pool, userID, listID)
 	if err != nil || list == nil {
 		return nil, err
 	}
@@ -411,8 +430,8 @@ func AddRecipeToShoppingList(ctx context.Context, pool *pgxpool.Pool, listID, re
 		next++
 	}
 
-	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1`, listID)
-	return GetShoppingList(ctx, pool, listID)
+	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1 AND user_id = $2`, listID, userID)
+	return GetShoppingList(ctx, pool, userID, listID)
 }
 
 func listItems(ctx context.Context, pool *pgxpool.Pool, listID string) ([]ShoppingListItem, error) {

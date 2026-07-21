@@ -8,7 +8,11 @@ import (
 )
 
 func (a *API) ListPantry(w http.ResponseWriter, r *http.Request) {
-	items, err := db.ListPantry(r.Context(), a.DB)
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	items, err := db.ListPantry(r.Context(), a.DB, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pantry")
 		return
@@ -17,6 +21,10 @@ func (a *API) ListPantry(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) CreatePantryItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	var in db.PantryItemInput
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -28,7 +36,7 @@ func (a *API) CreatePantryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := db.CreatePantryItem(r.Context(), a.DB, in)
+	item, err := db.CreatePantryItem(r.Context(), a.DB, userID, in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create pantry item")
 		return
@@ -37,6 +45,10 @@ func (a *API) CreatePantryItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) UpdatePantryItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var in db.PantryItemInput
 	if err := decodeJSON(r, &in); err != nil {
@@ -49,7 +61,7 @@ func (a *API) UpdatePantryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := db.UpdatePantryItem(r.Context(), a.DB, id, in)
+	item, err := db.UpdatePantryItem(r.Context(), a.DB, userID, id, in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update pantry item")
 		return
@@ -62,8 +74,12 @@ func (a *API) UpdatePantryItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) TogglePantryStock(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
-	item, err := db.TogglePantryStock(r.Context(), a.DB, id)
+	item, err := db.TogglePantryStock(r.Context(), a.DB, userID, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to toggle pantry item")
 		return
@@ -76,13 +92,17 @@ func (a *API) TogglePantryStock(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) DeletePantryItem(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
-	ok, err := db.DeletePantryItem(r.Context(), a.DB, id)
+	okDel, err := db.DeletePantryItem(r.Context(), a.DB, userID, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete pantry item")
 		return
 	}
-	if !ok {
+	if !okDel {
 		writeError(w, http.StatusNotFound, "pantry item not found")
 		return
 	}
@@ -90,6 +110,10 @@ func (a *API) DeletePantryItem(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) ReplacePantry(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	var items []db.PantryReplaceItem
 	if err := decodeJSON(r, &items); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -99,7 +123,7 @@ func (a *API) ReplacePantry(w http.ResponseWriter, r *http.Request) {
 		items = []db.PantryReplaceItem{}
 	}
 
-	out, err := db.ReplacePantry(r.Context(), a.DB, items)
+	out, err := db.ReplacePantry(r.Context(), a.DB, userID, items)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save pantry")
 		return

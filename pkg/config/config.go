@@ -11,6 +11,8 @@ type Config struct {
 	Environment          string
 	DatabaseURL          string
 	AllowedOrigin        string
+	JWTSecret            string
+	GoogleClientID       string
 	HTTPWriteTimeoutSec  int
 	DatabasePoolMaxConns int
 }
@@ -21,6 +23,8 @@ func Load() Config {
 		Environment:          getEnv("APP_ENV", "development"),
 		DatabaseURL:          resolveDatabaseURL(),
 		AllowedOrigin:        getEnv("ALLOWED_ORIGIN", "*"),
+		JWTSecret:            getEnv("JWT_SECRET", ""),
+		GoogleClientID:       getEnv("GOOGLE_CLIENT_ID", ""),
 		HTTPWriteTimeoutSec:  getEnvInt("HTTP_WRITE_TIMEOUT_SEC", 120),
 		DatabasePoolMaxConns: getEnvInt("DATABASE_POOL_MAX_CONNS", 5),
 	}

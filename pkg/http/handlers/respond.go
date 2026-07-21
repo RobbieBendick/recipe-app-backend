@@ -6,10 +6,12 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/robbi/recipe-app-backend/pkg/auth"
 )
 
 type API struct {
-	DB *pgxpool.Pool
+	DB   *pgxpool.Pool
+	Auth *auth.Service
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {
@@ -30,4 +32,13 @@ func decodeJSON(r *http.Request, dest any) error {
 
 func trimNonEmpty(value string) string {
 	return strings.TrimSpace(value)
+}
+
+func (a *API) requireUser(w http.ResponseWriter, r *http.Request) (string, bool) {
+	userID, ok := auth.UserIDFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return "", false
+	}
+	return userID, true
 }

@@ -8,7 +8,11 @@ import (
 )
 
 func (a *API) ListRecipes(w http.ResponseWriter, r *http.Request) {
-	recipes, err := db.ListRecipes(r.Context(), a.DB)
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	recipes, err := db.ListRecipes(r.Context(), a.DB, userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list recipes")
 		return
@@ -17,8 +21,12 @@ func (a *API) ListRecipes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) GetRecipe(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
-	recipe, err := db.GetRecipe(r.Context(), a.DB, id)
+	recipe, err := db.GetRecipe(r.Context(), a.DB, userID, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load recipe")
 		return
@@ -31,6 +39,10 @@ func (a *API) GetRecipe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) CreateRecipe(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	var in db.RecipeInput
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -48,7 +60,7 @@ func (a *API) CreateRecipe(w http.ResponseWriter, r *http.Request) {
 		in.Steps = []string{}
 	}
 
-	recipe, err := db.CreateRecipe(r.Context(), a.DB, in)
+	recipe, err := db.CreateRecipe(r.Context(), a.DB, userID, in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create recipe")
 		return
@@ -57,6 +69,10 @@ func (a *API) CreateRecipe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) UpdateRecipe(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	var in db.RecipeInput
 	if err := decodeJSON(r, &in); err != nil {
@@ -75,7 +91,7 @@ func (a *API) UpdateRecipe(w http.ResponseWriter, r *http.Request) {
 		in.Steps = []string{}
 	}
 
-	recipe, err := db.UpdateRecipe(r.Context(), a.DB, id, in)
+	recipe, err := db.UpdateRecipe(r.Context(), a.DB, userID, id, in)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update recipe")
 		return
@@ -88,13 +104,17 @@ func (a *API) UpdateRecipe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) DeleteRecipe(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
-	ok, err := db.DeleteRecipe(r.Context(), a.DB, id)
+	okDel, err := db.DeleteRecipe(r.Context(), a.DB, userID, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete recipe")
 		return
 	}
-	if !ok {
+	if !okDel {
 		writeError(w, http.StatusNotFound, "recipe not found")
 		return
 	}
@@ -102,8 +122,12 @@ func (a *API) DeleteRecipe(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) MakeShoppingListFromRecipe(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
 	id := chi.URLParam(r, "id")
-	list, err := db.CreateShoppingListFromRecipe(r.Context(), a.DB, id)
+	list, err := db.CreateShoppingListFromRecipe(r.Context(), a.DB, userID, id)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create shopping list")
 		return
