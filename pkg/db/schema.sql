@@ -1,22 +1,28 @@
--- recipes + shopping lists for recipe-app
+-- recipes + shopping lists + pantry for recipe-app
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 CREATE TABLE IF NOT EXISTS recipes (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	title TEXT NOT NULL,
 	description TEXT NOT NULL DEFAULT '',
+	emoji TEXT NOT NULL DEFAULT '',
 	ingredients TEXT[] NOT NULL DEFAULT '{}',
 	steps TEXT[] NOT NULL DEFAULT '{}',
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '';
+
 CREATE TABLE IF NOT EXISTS shopping_lists (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 	title TEXT NOT NULL,
+	emoji TEXT NOT NULL DEFAULT '🛒',
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE shopping_lists ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '🛒';
 
 CREATE TABLE IF NOT EXISTS shopping_list_items (
 	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -28,6 +34,17 @@ CREATE TABLE IF NOT EXISTS shopping_list_items (
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS pantry_items (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	name TEXT NOT NULL,
+	emoji TEXT NOT NULL DEFAULT '',
+	notes TEXT NOT NULL DEFAULT '',
+	in_stock BOOLEAN NOT NULL DEFAULT TRUE,
+	sort_order INTEGER NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE INDEX IF NOT EXISTS shopping_list_items_list_id_idx
 	ON shopping_list_items (list_id);
 
@@ -36,3 +53,6 @@ CREATE INDEX IF NOT EXISTS recipes_updated_at_idx
 
 CREATE INDEX IF NOT EXISTS shopping_lists_updated_at_idx
 	ON shopping_lists (updated_at DESC);
+
+CREATE INDEX IF NOT EXISTS pantry_items_sort_order_idx
+	ON pantry_items (sort_order ASC, name ASC);

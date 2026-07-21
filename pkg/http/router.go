@@ -57,6 +57,17 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				})
 			})
 		})
+
+		r.Route("/pantry", func(r chi.Router) {
+			r.Get("/", api.ListPantry)
+			r.Put("/", api.ReplacePantry)
+			r.Post("/", api.CreatePantryItem)
+			r.Route("/{id}", func(r chi.Router) {
+				r.Put("/", api.UpdatePantryItem)
+				r.Patch("/", api.TogglePantryStock)
+				r.Delete("/", api.DeletePantryItem)
+			})
+		})
 	})
 
 	return r

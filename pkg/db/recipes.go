@@ -13,6 +13,7 @@ type Recipe struct {
 	ID          string    `json:"id"`
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
+	Emoji       string    `json:"emoji"`
 	Ingredients []string  `json:"ingredients"`
 	Steps       []string  `json:"steps"`
 	CreatedAt   time.Time `json:"createdAt"`
@@ -22,6 +23,7 @@ type Recipe struct {
 type RecipeInput struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
+	Emoji       string   `json:"emoji"`
 	Ingredients []string `json:"ingredients"`
 	Steps       []string `json:"steps"`
 }
@@ -37,6 +39,7 @@ type ShoppingListItem struct {
 type ShoppingList struct {
 	ID        string             `json:"id"`
 	Title     string             `json:"title"`
+	Emoji     string             `json:"emoji"`
 	Items     []ShoppingListItem `json:"items"`
 	CreatedAt time.Time          `json:"createdAt"`
 	UpdatedAt time.Time          `json:"updatedAt"`
@@ -44,13 +47,14 @@ type ShoppingList struct {
 
 type ShoppingListInput struct {
 	Title          string   `json:"title"`
+	Emoji          string   `json:"emoji"`
 	Items          []string `json:"items"`
 	SourceRecipeID *string  `json:"sourceRecipeId,omitempty"`
 }
 
 func ListRecipes(ctx context.Context, pool *pgxpool.Pool) ([]Recipe, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, title, description, ingredients, steps, created_at, updated_at
+		SELECT id, title, description, emoji, ingredients, steps, created_at, updated_at
 		FROM recipes
 		ORDER BY updated_at DESC
 	`)
@@ -75,7 +79,7 @@ func ListRecipes(ctx context.Context, pool *pgxpool.Pool) ([]Recipe, error) {
 
 func GetRecipe(ctx context.Context, pool *pgxpool.Pool, id string) (*Recipe, error) {
 	row := pool.QueryRow(ctx, `
-		SELECT id, title, description, ingredients, steps, created_at, updated_at
+		SELECT id, title, description, emoji, ingredients, steps, created_at, updated_at
 		FROM recipes
 		WHERE id = $1
 	`, id)
@@ -91,10 +95,10 @@ func GetRecipe(ctx context.Context, pool *pgxpool.Pool, id string) (*Recipe, err
 
 func CreateRecipe(ctx context.Context, pool *pgxpool.Pool, in RecipeInput) (*Recipe, error) {
 	row := pool.QueryRow(ctx, `
-		INSERT INTO recipes (title, description, ingredients, steps)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id, title, description, ingredients, steps, created_at, updated_at
-	`, in.Title, in.Description, in.Ingredients, in.Steps)
+		INSERT INTO recipes (title, description, emoji, ingredients, steps)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, title, description, emoji, ingredients, steps, created_at, updated_at
+	`, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps)
 	r, err := scanRecipe(row)
 	if err != nil {
 		return nil, err
@@ -107,12 +111,13 @@ func UpdateRecipe(ctx context.Context, pool *pgxpool.Pool, id string, in RecipeI
 		UPDATE recipes
 		SET title = $2,
 			description = $3,
-			ingredients = $4,
-			steps = $5,
+			emoji = $4,
+			ingredients = $5,
+			steps = $6,
 			updated_at = now()
 		WHERE id = $1
-		RETURNING id, title, description, ingredients, steps, created_at, updated_at
-	`, id, in.Title, in.Description, in.Ingredients, in.Steps)
+		RETURNING id, title, description, emoji, ingredients, steps, created_at, updated_at
+	`, id, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps)
 	r, err := scanRecipe(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -139,7 +144,7 @@ func scanRecipe(row scannable) (Recipe, error) {
 	var r Recipe
 	var ingredients []string
 	var steps []string
-	err := row.Scan(&r.ID, &r.Title, &r.Description, &ingredients, &steps, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.ID, &r.Title, &r.Description, &r.Emoji, &ingredients, &steps, &r.CreatedAt, &r.UpdatedAt)
 	if err != nil {
 		return r, err
 	}
@@ -156,7 +161,7 @@ func scanRecipe(row scannable) (Recipe, error) {
 
 func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool) ([]ShoppingList, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, title, created_at, updated_at
+		SELECT id, title, emoji, created_at, updated_at
 		FROM shopping_lists
 		ORDER BY updated_at DESC
 	`)
@@ -168,7 +173,7 @@ func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool) ([]ShoppingList,
 	var out []ShoppingList
 	for rows.Next() {
 		var list ShoppingList
-		if err := rows.Scan(&list.ID, &list.Title, &list.CreatedAt, &list.UpdatedAt); err != nil {
+		if err := rows.Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt); err != nil {
 			return nil, err
 		}
 		items, err := listItems(ctx, pool, list.ID)
@@ -187,10 +192,10 @@ func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool) ([]ShoppingList,
 func GetShoppingList(ctx context.Context, pool *pgxpool.Pool, id string) (*ShoppingList, error) {
 	var list ShoppingList
 	err := pool.QueryRow(ctx, `
-		SELECT id, title, created_at, updated_at
+		SELECT id, title, emoji, created_at, updated_at
 		FROM shopping_lists
 		WHERE id = $1
-	`, id).Scan(&list.ID, &list.Title, &list.CreatedAt, &list.UpdatedAt)
+	`, id).Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -212,12 +217,17 @@ func CreateShoppingList(ctx context.Context, pool *pgxpool.Pool, in ShoppingList
 	}
 	defer tx.Rollback(ctx)
 
+	emoji := in.Emoji
+	if emoji == "" {
+		emoji = "🛒"
+	}
+
 	var list ShoppingList
 	err = tx.QueryRow(ctx, `
-		INSERT INTO shopping_lists (title)
-		VALUES ($1)
-		RETURNING id, title, created_at, updated_at
-	`, in.Title).Scan(&list.ID, &list.Title, &list.CreatedAt, &list.UpdatedAt)
+		INSERT INTO shopping_lists (title, emoji)
+		VALUES ($1, $2)
+		RETURNING id, title, emoji, created_at, updated_at
+	`, in.Title, emoji).Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -245,11 +255,16 @@ func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, id string, in S
 	}
 	defer tx.Rollback(ctx)
 
+	emoji := in.Emoji
+	if emoji == "" {
+		emoji = "🛒"
+	}
+
 	tag, err := tx.Exec(ctx, `
 		UPDATE shopping_lists
-		SET title = $2, updated_at = now()
+		SET title = $2, emoji = $3, updated_at = now()
 		WHERE id = $1
-	`, id, in.Title)
+	`, id, in.Title, emoji)
 	if err != nil {
 		return nil, err
 	}
@@ -349,8 +364,13 @@ func CreateShoppingListFromRecipe(ctx context.Context, pool *pgxpool.Pool, recip
 		return nil, err
 	}
 	sourceID := recipe.ID
+	emoji := recipe.Emoji
+	if emoji == "" {
+		emoji = "🛒"
+	}
 	return CreateShoppingList(ctx, pool, ShoppingListInput{
 		Title:          "Shop: " + recipe.Title,
+		Emoji:          emoji,
 		Items:          recipe.Ingredients,
 		SourceRecipeID: &sourceID,
 	})
