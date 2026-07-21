@@ -22,10 +22,10 @@ func main() {
 	cfg := config.Load()
 
 	if cfg.Environment == "production" {
-		if _, ok := os.LookupEnv("DATABASE_URL"); !ok {
+		if cfg.DatabaseURL == "" {
 			log.Fatal(
-				"DATABASE_URL is not set. Add your Neon connection string in the " +
-					"host environment (Render → Environment, Fly secrets, etc.).",
+				"No database URL found. Set DATABASE_URL or POSTGRES_URL_NON_POOLING " +
+					"(Neon/Vercel env).",
 			)
 		}
 	}

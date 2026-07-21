@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -18,11 +19,27 @@ func Load() Config {
 	return Config{
 		Port:                 getEnv("PORT", "8080"),
 		Environment:          getEnv("APP_ENV", "development"),
-		DatabaseURL:          getEnv("DATABASE_URL", ""),
-		AllowedOrigin:        getEnv("ALLOWED_ORIGIN", "http://localhost:5173"),
+		DatabaseURL:          resolveDatabaseURL(),
+		AllowedOrigin:        getEnv("ALLOWED_ORIGIN", "*"),
 		HTTPWriteTimeoutSec:  getEnvInt("HTTP_WRITE_TIMEOUT_SEC", 120),
-		DatabasePoolMaxConns: getEnvInt("DATABASE_POOL_MAX_CONNS", 10),
+		DatabasePoolMaxConns: getEnvInt("DATABASE_POOL_MAX_CONNS", 5),
 	}
+}
+
+// resolveDatabaseURL prefers DATABASE_URL, then common Neon/Vercel names.
+func resolveDatabaseURL() string {
+	candidates := []string{
+		"DATABASE_URL",
+		"POSTGRES_URL_NON_POOLING",
+		"POSTGRES_URL",
+		"POSTGRES_PRISMA_URL",
+	}
+	for _, key := range candidates {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func getEnvInt(key string, fallback int) int {
