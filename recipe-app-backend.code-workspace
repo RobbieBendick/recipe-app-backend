@@ -1,0 +1,8 @@
+{
+	"folders": [
+		{ "path": ".", "name": "recipe-app-backend" }
+	],
+	"settings": {
+		"go.useLanguageServer": true
+	}
+}
