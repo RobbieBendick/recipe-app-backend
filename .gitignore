@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+/dist/
+recipe-api.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test
+*.test
+*.out
+coverage.*
+
+# Env
+.env
+.env.*
+!.env.example
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
