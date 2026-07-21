@@ -68,8 +68,7 @@ func clampPercent(value int) int {
 	return value
 }
 
-// normalizeStock keeps percent and inStock in sync:
-// 0% => out, >0% => in stock. Toggling out forces 0%; toggling in from 0% becomes 100%.
+// 0% => out, >0% => in stock. Toggling out forces 0%; toggling in from 0% becomes 50%.
 func normalizeStock(percent int, inStockHint *bool) (int, bool) {
 	p := clampPercent(percent)
 	if inStockHint != nil {
@@ -77,7 +76,7 @@ func normalizeStock(percent int, inStockHint *bool) (int, bool) {
 			return 0, false
 		}
 		if p == 0 {
-			return 100, true
+			return 50, true
 		}
 		return p, true
 	}
@@ -128,7 +127,7 @@ func seedDefaultPantry(ctx context.Context, pool *pgxpool.Pool) error {
 	for i, item := range defaultPantry {
 		_, err := pool.Exec(ctx, `
 			INSERT INTO pantry_items (name, emoji, notes, in_stock, percent, sort_order)
-			VALUES ($1, $2, '', TRUE, 100, $3)
+			VALUES ($1, $2, '', TRUE, 50, $3)
 		`, item.Name, item.Emoji, i)
 		if err != nil {
 			return err
@@ -138,7 +137,7 @@ func seedDefaultPantry(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func CreatePantryItem(ctx context.Context, pool *pgxpool.Pool, in PantryItemInput) (*PantryItem, error) {
-	percent := 100
+	percent := 50
 	if in.Percent != nil {
 		percent = *in.Percent
 	}
@@ -200,7 +199,7 @@ func TogglePantryStock(ctx context.Context, pool *pgxpool.Pool, id string) (*Pan
 	row := pool.QueryRow(ctx, `
 		UPDATE pantry_items
 		SET
-			percent = CASE WHEN percent > 0 THEN 0 ELSE 100 END,
+			percent = CASE WHEN percent > 0 THEN 0 ELSE 50 END,
 			in_stock = CASE WHEN percent > 0 THEN FALSE ELSE TRUE END,
 			updated_at = now()
 		WHERE id = $1
