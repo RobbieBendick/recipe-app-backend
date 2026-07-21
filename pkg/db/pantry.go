@@ -15,6 +15,7 @@ type PantryItem struct {
 	Emoji     string    `json:"emoji"`
 	Notes     string    `json:"notes"`
 	InStock   bool      `json:"inStock"`
+	Percent   int       `json:"percent"`
 	SortOrder int       `json:"sortOrder"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -25,6 +26,7 @@ type PantryItemInput struct {
 	Emoji   string `json:"emoji"`
 	Notes   string `json:"notes"`
 	InStock *bool  `json:"inStock,omitempty"`
+	Percent *int   `json:"percent,omitempty"`
 }
 
 type PantryReplaceItem struct {
@@ -33,6 +35,7 @@ type PantryReplaceItem struct {
 	Emoji   string `json:"emoji"`
 	Notes   string `json:"notes"`
 	InStock bool   `json:"inStock"`
+	Percent int    `json:"percent"`
 }
 
 var defaultPantry = []struct {
@@ -55,6 +58,32 @@ var defaultPantry = []struct {
 	{"🫙", "Yogurt"},
 }
 
+func clampPercent(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
+// normalizeStock keeps percent and inStock in sync:
+// 0% => out, >0% => in stock. Toggling out forces 0%; toggling in from 0% becomes 100%.
+func normalizeStock(percent int, inStockHint *bool) (int, bool) {
+	p := clampPercent(percent)
+	if inStockHint != nil {
+		if !*inStockHint {
+			return 0, false
+		}
+		if p == 0 {
+			return 100, true
+		}
+		return p, true
+	}
+	return p, p > 0
+}
+
 func ListPantry(ctx context.Context, pool *pgxpool.Pool) ([]PantryItem, error) {
 	items, err := queryPantry(ctx, pool)
 	if err != nil {
@@ -72,7 +101,7 @@ func ListPantry(ctx context.Context, pool *pgxpool.Pool) ([]PantryItem, error) {
 
 func queryPantry(ctx context.Context, pool *pgxpool.Pool) ([]PantryItem, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, name, emoji, notes, in_stock, sort_order, created_at, updated_at
+		SELECT id, name, emoji, notes, in_stock, percent, sort_order, created_at, updated_at
 		FROM pantry_items
 		ORDER BY sort_order ASC, name ASC
 	`)
@@ -98,8 +127,8 @@ func queryPantry(ctx context.Context, pool *pgxpool.Pool) ([]PantryItem, error) 
 func seedDefaultPantry(ctx context.Context, pool *pgxpool.Pool) error {
 	for i, item := range defaultPantry {
 		_, err := pool.Exec(ctx, `
-			INSERT INTO pantry_items (name, emoji, notes, in_stock, sort_order)
-			VALUES ($1, $2, '', TRUE, $3)
+			INSERT INTO pantry_items (name, emoji, notes, in_stock, percent, sort_order)
+			VALUES ($1, $2, '', TRUE, 100, $3)
 		`, item.Name, item.Emoji, i)
 		if err != nil {
 			return err
@@ -109,10 +138,11 @@ func seedDefaultPantry(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 func CreatePantryItem(ctx context.Context, pool *pgxpool.Pool, in PantryItemInput) (*PantryItem, error) {
-	inStock := true
-	if in.InStock != nil {
-		inStock = *in.InStock
+	percent := 100
+	if in.Percent != nil {
+		percent = *in.Percent
 	}
+	percent, inStock := normalizeStock(percent, in.InStock)
 
 	var maxOrder *int
 	_ = pool.QueryRow(ctx, `SELECT MAX(sort_order) FROM pantry_items`).Scan(&maxOrder)
@@ -122,10 +152,10 @@ func CreatePantryItem(ctx context.Context, pool *pgxpool.Pool, in PantryItemInpu
 	}
 
 	row := pool.QueryRow(ctx, `
-		INSERT INTO pantry_items (name, emoji, notes, in_stock, sort_order)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, name, emoji, notes, in_stock, sort_order, created_at, updated_at
-	`, in.Name, in.Emoji, in.Notes, inStock, next)
+		INSERT INTO pantry_items (name, emoji, notes, in_stock, percent, sort_order)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, name, emoji, notes, in_stock, percent, sort_order, created_at, updated_at
+	`, in.Name, in.Emoji, in.Notes, inStock, percent, next)
 	item, err := scanPantry(row)
 	if err != nil {
 		return nil, err
@@ -139,10 +169,11 @@ func UpdatePantryItem(ctx context.Context, pool *pgxpool.Pool, id string, in Pan
 		return nil, err
 	}
 
-	inStock := existing.InStock
-	if in.InStock != nil {
-		inStock = *in.InStock
+	percent := existing.Percent
+	if in.Percent != nil {
+		percent = *in.Percent
 	}
+	percent, inStock := normalizeStock(percent, in.InStock)
 
 	row := pool.QueryRow(ctx, `
 		UPDATE pantry_items
@@ -150,10 +181,11 @@ func UpdatePantryItem(ctx context.Context, pool *pgxpool.Pool, id string, in Pan
 			emoji = $3,
 			notes = $4,
 			in_stock = $5,
+			percent = $6,
 			updated_at = now()
 		WHERE id = $1
-		RETURNING id, name, emoji, notes, in_stock, sort_order, created_at, updated_at
-	`, id, in.Name, in.Emoji, in.Notes, inStock)
+		RETURNING id, name, emoji, notes, in_stock, percent, sort_order, created_at, updated_at
+	`, id, in.Name, in.Emoji, in.Notes, inStock, percent)
 	item, err := scanPantry(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -167,9 +199,12 @@ func UpdatePantryItem(ctx context.Context, pool *pgxpool.Pool, id string, in Pan
 func TogglePantryStock(ctx context.Context, pool *pgxpool.Pool, id string) (*PantryItem, error) {
 	row := pool.QueryRow(ctx, `
 		UPDATE pantry_items
-		SET in_stock = NOT in_stock, updated_at = now()
+		SET
+			percent = CASE WHEN percent > 0 THEN 0 ELSE 100 END,
+			in_stock = CASE WHEN percent > 0 THEN FALSE ELSE TRUE END,
+			updated_at = now()
 		WHERE id = $1
-		RETURNING id, name, emoji, notes, in_stock, sort_order, created_at, updated_at
+		RETURNING id, name, emoji, notes, in_stock, percent, sort_order, created_at, updated_at
 	`, id)
 	item, err := scanPantry(row)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -206,10 +241,12 @@ func ReplacePantry(ctx context.Context, pool *pgxpool.Pool, items []PantryReplac
 		if name == "" {
 			continue
 		}
+		inStockHint := item.InStock
+		percent, inStock := normalizeStock(item.Percent, &inStockHint)
 		_, err := tx.Exec(ctx, `
-			INSERT INTO pantry_items (name, emoji, notes, in_stock, sort_order)
-			VALUES ($1, $2, $3, $4, $5)
-		`, name, item.Emoji, item.Notes, item.InStock, i)
+			INSERT INTO pantry_items (name, emoji, notes, in_stock, percent, sort_order)
+			VALUES ($1, $2, $3, $4, $5, $6)
+		`, name, item.Emoji, item.Notes, inStock, percent, i)
 		if err != nil {
 			return nil, err
 		}
@@ -223,7 +260,7 @@ func ReplacePantry(ctx context.Context, pool *pgxpool.Pool, items []PantryReplac
 
 func getPantryItem(ctx context.Context, pool *pgxpool.Pool, id string) (*PantryItem, error) {
 	row := pool.QueryRow(ctx, `
-		SELECT id, name, emoji, notes, in_stock, sort_order, created_at, updated_at
+		SELECT id, name, emoji, notes, in_stock, percent, sort_order, created_at, updated_at
 		FROM pantry_items
 		WHERE id = $1
 	`, id)
@@ -245,6 +282,7 @@ func scanPantry(row scannable) (PantryItem, error) {
 		&item.Emoji,
 		&item.Notes,
 		&item.InStock,
+		&item.Percent,
 		&item.SortOrder,
 		&item.CreatedAt,
 		&item.UpdatedAt,
