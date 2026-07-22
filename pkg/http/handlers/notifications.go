@@ -58,3 +58,28 @@ func (a *API) MarkAllNotificationsRead(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (a *API) DeleteNotification(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	if err := db.DeleteNotification(r.Context(), a.DB, userID, id); err != nil {
+		writeError(w, http.StatusNotFound, "notification not found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *API) ClearAllNotifications(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if err := db.ClearAllNotifications(r.Context(), a.DB, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clear notifications")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

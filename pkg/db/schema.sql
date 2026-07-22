@@ -184,3 +184,30 @@ CREATE INDEX IF NOT EXISTS notifications_user_id_unread_idx
 	ON notifications (user_id)
 	WHERE read_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS recipe_shares (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	recipe_id UUID REFERENCES recipes (id) ON DELETE SET NULL,
+	from_user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	to_user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	status TEXT NOT NULL DEFAULT 'pending',
+	recipe_title TEXT NOT NULL,
+	recipe_description TEXT NOT NULL DEFAULT '',
+	recipe_emoji TEXT NOT NULL DEFAULT '',
+	recipe_ingredients TEXT[] NOT NULL DEFAULT '{}',
+	recipe_steps TEXT[] NOT NULL DEFAULT '{}',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT recipe_shares_no_self CHECK (from_user_id <> to_user_id),
+	CONSTRAINT recipe_shares_status_check CHECK (status IN ('pending', 'accepted', 'declined'))
+);
+
+CREATE INDEX IF NOT EXISTS recipe_shares_to_user_id_idx
+	ON recipe_shares (to_user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS recipe_shares_from_user_id_idx
+	ON recipe_shares (from_user_id, created_at DESC);
+
+CREATE UNIQUE INDEX IF NOT EXISTS recipe_shares_pending_unique_idx
+	ON recipe_shares (from_user_id, to_user_id, recipe_id)
+	WHERE status = 'pending' AND recipe_id IS NOT NULL;
+

@@ -259,6 +259,22 @@ func ListOutgoingFriendRequests(ctx context.Context, pool *pgxpool.Pool, userID 
 	return out, rows.Err()
 }
 
+func AreFriends(ctx context.Context, pool *pgxpool.Pool, userA, userB string) (bool, error) {
+	var exists bool
+	err := pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM friendships
+			WHERE status = $3
+			  AND (
+				(requester_id = $1 AND addressee_id = $2)
+				OR (requester_id = $2 AND addressee_id = $1)
+			  )
+		)
+	`, userA, userB, FriendshipAccepted).Scan(&exists)
+	return exists, err
+}
+
 func NormalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
 }

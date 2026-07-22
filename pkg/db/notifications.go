@@ -13,6 +13,8 @@ import (
 const (
 	NotificationFriendRequest  = "friend_request"
 	NotificationFriendAccepted = "friend_accepted"
+	NotificationRecipeShare    = "recipe_share"
+	NotificationRecipeAccepted = "recipe_share_accepted"
 )
 
 type Notification struct {
@@ -115,6 +117,50 @@ func MarkFriendRequestNotificationsRead(ctx context.Context, pool *pgxpool.Pool,
 		  AND read_at IS NULL
 		  AND data->>'friendshipId' = $3
 	`, userID, NotificationFriendRequest, friendshipID)
+	return err
+}
+
+func MarkRecipeShareNotificationsRead(ctx context.Context, pool *pgxpool.Pool, userID, shareID string) error {
+	_, err := pool.Exec(ctx, `
+		UPDATE notifications
+		SET read_at = COALESCE(read_at, now())
+		WHERE user_id = $1
+		  AND type = $2
+		  AND read_at IS NULL
+		  AND data->>'shareId' = $3
+	`, userID, NotificationRecipeShare, shareID)
+	return err
+}
+
+func DeleteRecipeShareNotifications(ctx context.Context, pool *pgxpool.Pool, userID, shareID string) error {
+	_, err := pool.Exec(ctx, `
+		DELETE FROM notifications
+		WHERE user_id = $1
+		  AND type = $2
+		  AND data->>'shareId' = $3
+	`, userID, NotificationRecipeShare, shareID)
+	return err
+}
+
+func DeleteNotification(ctx context.Context, pool *pgxpool.Pool, userID, notificationID string) error {
+	tag, err := pool.Exec(ctx, `
+		DELETE FROM notifications
+		WHERE id = $1 AND user_id = $2
+	`, notificationID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return errors.New("notification not found")
+	}
+	return nil
+}
+
+func ClearAllNotifications(ctx context.Context, pool *pgxpool.Pool, userID string) error {
+	_, err := pool.Exec(ctx, `
+		DELETE FROM notifications
+		WHERE user_id = $1
+	`, userID)
 	return err
 }
 

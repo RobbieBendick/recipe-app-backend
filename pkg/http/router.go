@@ -70,7 +70,13 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 					r.Put("/", api.UpdateRecipe)
 					r.Delete("/", api.DeleteRecipe)
 					r.Post("/shopping-list", api.MakeShoppingListFromRecipe)
+					r.Post("/share", api.ShareRecipe)
 				})
+			})
+
+			r.Route("/recipe-shares", func(r chi.Router) {
+				r.Post("/{id}/accept", api.AcceptRecipeShare)
+				r.Post("/{id}/decline", api.DeclineRecipeShare)
 			})
 
 			r.Route("/shopping-lists", func(r chi.Router) {
@@ -121,7 +127,9 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Get("/", api.ListNotifications)
 				r.Get("/unread-count", api.UnreadNotificationCount)
 				r.Post("/read-all", api.MarkAllNotificationsRead)
+				r.Delete("/", api.ClearAllNotifications)
 				r.Post("/{id}/read", api.MarkNotificationRead)
+				r.Delete("/{id}", api.DeleteNotification)
 			})
 		})
 	})
