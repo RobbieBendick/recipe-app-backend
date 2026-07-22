@@ -193,6 +193,35 @@ func (a *API) RemoveFriend(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *API) GetOrCreateSharedShoppingList(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	friendID := chi.URLParam(r, "userId")
+	list, created, err := db.GetOrCreateSharedShoppingList(r.Context(), a.DB, userID, friendID)
+	if err != nil {
+		switch {
+		case errors.Is(err, db.ErrNotFriends):
+			writeError(w, http.StatusForbidden, "you can only share a list with friends")
+		case errors.Is(err, db.ErrCannotFriendSelf):
+			writeError(w, http.StatusBadRequest, "you can't open a shared list with yourself")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to open shared shopping list")
+		}
+		return
+	}
+	if list == nil {
+		writeError(w, http.StatusNotFound, "shared shopping list not found")
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, list)
+}
+
 func displayName(u *db.User) string {
 	if u == nil {
 		return "Someone"

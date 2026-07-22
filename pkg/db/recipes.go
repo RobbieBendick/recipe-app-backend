@@ -44,6 +44,7 @@ type ShoppingList struct {
 	Emoji        string             `json:"emoji"`
 	Items        []ShoppingListItem `json:"items"`
 	RecipeCounts map[string]int     `json:"recipeCounts"`
+	SharedWith   *PublicUser        `json:"sharedWith,omitempty"`
 	CreatedAt    time.Time          `json:"createdAt"`
 	UpdatedAt    time.Time          `json:"updatedAt"`
 }
@@ -169,6 +170,9 @@ func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool, userID string) (
 		SELECT id, title, emoji, COALESCE(recipe_counts, '{}'::jsonb), created_at, updated_at
 		FROM shopping_lists
 		WHERE user_id = $1
+		  AND NOT EXISTS (
+			SELECT 1 FROM shopping_list_shares s WHERE s.list_id = shopping_lists.id
+		  )
 		ORDER BY updated_at DESC
 	`, userID)
 	if err != nil {
@@ -197,12 +201,20 @@ func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool, userID string) (
 }
 
 func GetShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string) (*ShoppingList, error) {
+	ok, err := canAccessShoppingList(ctx, pool, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+
 	var list ShoppingList
-	err := pool.QueryRow(ctx, `
+	err = pool.QueryRow(ctx, `
 		SELECT id, title, emoji, COALESCE(recipe_counts, '{}'::jsonb), created_at, updated_at
 		FROM shopping_lists
-		WHERE id = $1 AND user_id = $2
-	`, id, userID).Scan(&list.ID, &list.Title, &list.Emoji, &list.RecipeCounts, &list.CreatedAt, &list.UpdatedAt)
+		WHERE id = $1
+	`, id).Scan(&list.ID, &list.Title, &list.Emoji, &list.RecipeCounts, &list.CreatedAt, &list.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -215,6 +227,9 @@ func GetShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string)
 		return nil, err
 	}
 	list.Items = items
+	if err := attachSharedWith(ctx, pool, userID, &list); err != nil {
+		return nil, err
+	}
 	return &list, nil
 }
 
@@ -270,6 +285,14 @@ func CreateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID string, 
 }
 
 func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string, in ShoppingListInput) (*ShoppingList, error) {
+	ok, err := canAccessShoppingList(ctx, pool, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -284,9 +307,9 @@ func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id stri
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE shopping_lists
-		SET title = $3, emoji = $4, recipe_counts = COALESCE($5::jsonb, '{}'::jsonb), updated_at = now()
-		WHERE id = $1 AND user_id = $2
-	`, id, userID, in.Title, emoji, counts)
+		SET title = $2, emoji = $3, recipe_counts = COALESCE($4::jsonb, '{}'::jsonb), updated_at = now()
+		WHERE id = $1
+	`, id, in.Title, emoji, counts)
 	if err != nil {
 		return nil, err
 	}
@@ -315,23 +338,43 @@ func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id stri
 }
 
 func DeleteShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string) (bool, error) {
-	tag, err := pool.Exec(ctx, `DELETE FROM shopping_lists WHERE id = $1 AND user_id = $2`, id, userID)
+	ok, err := canAccessShoppingList(ctx, pool, userID, id)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, nil
+	}
+	tag, err := pool.Exec(ctx, `DELETE FROM shopping_lists WHERE id = $1`, id)
 	if err != nil {
 		return false, err
 	}
 	return tag.RowsAffected() > 0, nil
 }
 
-func ownsList(ctx context.Context, pool *pgxpool.Pool, userID, listID string) (bool, error) {
+func canAccessShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, listID string) (bool, error) {
 	var exists bool
 	err := pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM shopping_lists WHERE id = $1 AND user_id = $2)
+		SELECT EXISTS (
+			SELECT 1 FROM shopping_lists WHERE id = $1 AND user_id = $2
+			UNION ALL
+			SELECT 1 FROM shopping_list_shares
+			WHERE list_id = $1 AND (user_a = $2 OR user_b = $2)
+		)
 	`, listID, userID).Scan(&exists)
 	return exists, err
 }
 
+func ownsList(ctx context.Context, pool *pgxpool.Pool, userID, listID string) (bool, error) {
+	return canAccessShoppingList(ctx, pool, userID, listID)
+}
+
+func touchShoppingList(ctx context.Context, pool *pgxpool.Pool, listID string) {
+	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1`, listID)
+}
+
 func ToggleShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, listID, itemID string) (*ShoppingList, error) {
-	ok, err := ownsList(ctx, pool, userID, listID)
+	ok, err := canAccessShoppingList(ctx, pool, userID, listID)
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -346,12 +389,12 @@ func ToggleShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, lis
 	if tag.RowsAffected() == 0 {
 		return nil, nil
 	}
-	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1 AND user_id = $2`, listID, userID)
+	touchShoppingList(ctx, pool, listID)
 	return GetShoppingList(ctx, pool, userID, listID)
 }
 
 func AddShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, listID, text string) (*ShoppingList, error) {
-	ok, err := ownsList(ctx, pool, userID, listID)
+	ok, err := canAccessShoppingList(ctx, pool, userID, listID)
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -375,12 +418,12 @@ func AddShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, listID
 	if err != nil {
 		return nil, err
 	}
-	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1 AND user_id = $2`, listID, userID)
+	touchShoppingList(ctx, pool, listID)
 	return GetShoppingList(ctx, pool, userID, listID)
 }
 
 func RemoveShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, listID, itemID string) (*ShoppingList, error) {
-	ok, err := ownsList(ctx, pool, userID, listID)
+	ok, err := canAccessShoppingList(ctx, pool, userID, listID)
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -393,7 +436,7 @@ func RemoveShoppingListItem(ctx context.Context, pool *pgxpool.Pool, userID, lis
 	if tag.RowsAffected() == 0 {
 		return nil, nil
 	}
-	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1 AND user_id = $2`, listID, userID)
+	touchShoppingList(ctx, pool, listID)
 	return GetShoppingList(ctx, pool, userID, listID)
 }
 
@@ -458,9 +501,9 @@ func AddRecipeToShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, li
 	counts[sourceID] = counts[sourceID] + 1
 	_, err = pool.Exec(ctx, `
 		UPDATE shopping_lists
-		SET recipe_counts = COALESCE($3::jsonb, '{}'::jsonb), updated_at = now()
-		WHERE id = $1 AND user_id = $2
-	`, listID, userID, cleanRecipeCounts(counts))
+		SET recipe_counts = COALESCE($2::jsonb, '{}'::jsonb), updated_at = now()
+		WHERE id = $1
+	`, listID, cleanRecipeCounts(counts))
 	if err != nil {
 		return nil, err
 	}

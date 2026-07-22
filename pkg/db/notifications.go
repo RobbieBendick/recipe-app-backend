@@ -11,10 +11,11 @@ import (
 )
 
 const (
-	NotificationFriendRequest  = "friend_request"
-	NotificationFriendAccepted = "friend_accepted"
-	NotificationRecipeShare    = "recipe_share"
-	NotificationRecipeAccepted = "recipe_share_accepted"
+	NotificationFriendRequest       = "friend_request"
+	NotificationFriendAccepted      = "friend_accepted"
+	NotificationRecipeShare         = "recipe_share"
+	NotificationRecipeAccepted      = "recipe_share_accepted"
+	NotificationSharedShoppingList  = "shared_shopping_list"
 )
 
 type Notification struct {

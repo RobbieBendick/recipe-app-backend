@@ -154,6 +154,9 @@ func DeclineFriendRequest(ctx context.Context, pool *pgxpool.Pool, friendshipID,
 }
 
 func RemoveFriendship(ctx context.Context, pool *pgxpool.Pool, userID, friendUserID string) error {
+	if err := DeleteSharedShoppingListForPair(ctx, pool, userID, friendUserID); err != nil {
+		return err
+	}
 	tag, err := pool.Exec(ctx, `
 		DELETE FROM friendships
 		WHERE status = $3

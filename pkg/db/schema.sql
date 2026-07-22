@@ -211,3 +211,14 @@ CREATE UNIQUE INDEX IF NOT EXISTS recipe_shares_pending_unique_idx
 	ON recipe_shares (from_user_id, to_user_id, recipe_id)
 	WHERE status = 'pending' AND recipe_id IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS shopping_list_shares (
+	list_id UUID PRIMARY KEY REFERENCES shopping_lists (id) ON DELETE CASCADE,
+	user_a UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	user_b UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	CONSTRAINT shopping_list_shares_ordered CHECK (user_a < user_b),
+	CONSTRAINT shopping_list_shares_pair_unique UNIQUE (user_a, user_b)
+);
+
+CREATE INDEX IF NOT EXISTS shopping_list_shares_user_a_idx ON shopping_list_shares (user_a);
+CREATE INDEX IF NOT EXISTS shopping_list_shares_user_b_idx ON shopping_list_shares (user_b);
+
