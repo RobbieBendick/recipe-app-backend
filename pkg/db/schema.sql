@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS pantry_items (
 	notes TEXT NOT NULL DEFAULT '',
 	in_stock BOOLEAN NOT NULL DEFAULT TRUE,
 	percent INTEGER NOT NULL DEFAULT 100,
+	unit TEXT NOT NULL DEFAULT 'percent',
 	sort_order INTEGER NOT NULL DEFAULT 0,
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 	updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -104,6 +105,20 @@ END $$;
 ALTER TABLE recipes ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '';
 ALTER TABLE shopping_lists ADD COLUMN IF NOT EXISTS emoji TEXT NOT NULL DEFAULT '🛒';
 ALTER TABLE pantry_items ADD COLUMN IF NOT EXISTS percent INTEGER NOT NULL DEFAULT 100;
+ALTER TABLE pantry_items ADD COLUMN IF NOT EXISTS unit TEXT NOT NULL DEFAULT 'percent';
+
+-- Prefer whole-number counts for typical countable staples.
+UPDATE pantry_items
+SET
+	unit = 'count',
+	percent = CASE
+		WHEN percent = 100 AND lower(name) = 'eggs' THEN 12
+		WHEN percent = 100 AND lower(name) IN ('onion', 'onions', 'garlic') THEN 3
+		WHEN percent = 100 AND lower(name) IN ('lemon', 'lemons') THEN 2
+		ELSE percent
+	END
+WHERE unit = 'percent'
+	AND lower(name) IN ('eggs', 'onion', 'onions', 'lemon', 'lemons', 'garlic');
 
 CREATE INDEX IF NOT EXISTS shopping_list_items_list_id_idx
 	ON shopping_list_items (list_id);
