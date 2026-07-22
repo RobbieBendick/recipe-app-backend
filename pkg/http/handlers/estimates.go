@@ -23,6 +23,21 @@ type estimateResponse struct {
 	Store *estimate.StoreInfo `json:"store,omitempty"`
 }
 
+func (a *API) EstimateStatus(w http.ResponseWriter, r *http.Request) {
+	if _, ok := a.requireUser(w, r); !ok {
+		return
+	}
+	if a.Kroger == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"configured": false,
+			"tokenOk":    false,
+			"tokenError": "kroger client not initialized",
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, a.Kroger.Status(r.Context()))
+}
+
 func (a *API) GetEstimateStore(w http.ResponseWriter, r *http.Request) {
 	userID, ok := a.requireUser(w, r)
 	if !ok {

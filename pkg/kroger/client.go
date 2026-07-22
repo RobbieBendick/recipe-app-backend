@@ -105,16 +105,46 @@ func (c *Client) token(ctx context.Context) (string, error) {
 		return c.accessToken, nil
 	}
 
+	// product.compact is required for product prices; empty scope still authenticates
+	// and is enough for location lookup if the Products scope isn't granted yet.
+	scopes := []string{tokenScope, ""}
+	var lastErr error
+	for _, scope := range scopes {
+		token, err := c.requestToken(ctx, scope, true)
+		if err == nil {
+			return token, nil
+		}
+		lastErr = err
+		// Retry with client_id/secret in the body (some portals expect this).
+		token, err = c.requestToken(ctx, scope, false)
+		if err == nil {
+			return token, nil
+		}
+		lastErr = err
+	}
+	return "", lastErr
+}
+
+func (c *Client) requestToken(ctx context.Context, scope string, useBasic bool) (string, error) {
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
-	form.Set("scope", tokenScope)
+	if scope != "" {
+		form.Set("scope", scope)
+	}
+	if !useBasic {
+		form.Set("client_id", c.clientID)
+		form.Set("client_secret", c.clientSecret)
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}
-	req.SetBasicAuth(c.clientID, c.clientSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	if useBasic {
+		req.SetBasicAuth(c.clientID, c.clientSecret)
+	}
 
 	res, err := c.http.Do(req)
 	if err != nil {
@@ -127,7 +157,7 @@ func (c *Client) token(ctx context.Context) (string, error) {
 		msg := strings.TrimSpace(string(body))
 		if res.StatusCode == http.StatusUnauthorized {
 			return "", fmt.Errorf(
-				"kroger rejected client credentials (401). Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET on the backend (Vercel), not the frontend, then redeploy. Details: %s",
+				"kroger rejected credentials (401). Confirm Client ID/Secret on the backend Vercel project (Production), that Products API is enabled, and redeploy. Details: %s",
 				msg,
 			)
 		}
@@ -149,6 +179,40 @@ func (c *Client) token(ctx context.Context) (string, error) {
 	c.accessToken = tr.AccessToken
 	c.tokenExpiry = time.Now().Add(time.Duration(expires) * time.Second)
 	return c.accessToken, nil
+}
+
+// Status is a safe diagnostic snapshot (never includes the secret).
+func (c *Client) Status(ctx context.Context) map[string]any {
+	out := map[string]any{
+		"configured":      c.Configured(),
+		"clientIdLength":  len(c.clientID),
+		"clientIdPrefix":  prefix(c.clientID, 4),
+		"secretConfigured": len(c.clientSecret) > 0,
+		"secretLength":    len(c.clientSecret),
+	}
+	if !c.Configured() {
+		out["tokenOk"] = false
+		out["tokenError"] = "missing KROGER_CLIENT_ID or KROGER_CLIENT_SECRET"
+		return out
+	}
+	_, err := c.token(ctx)
+	if err != nil {
+		out["tokenOk"] = false
+		out["tokenError"] = err.Error()
+		return out
+	}
+	out["tokenOk"] = true
+	return out
+}
+
+func prefix(value string, n int) string {
+	if value == "" {
+		return ""
+	}
+	if len(value) <= n {
+		return value
+	}
+	return value[:n] + "…"
 }
 
 func (c *Client) getJSON(ctx context.Context, endpoint string, query url.Values, dest any) error {

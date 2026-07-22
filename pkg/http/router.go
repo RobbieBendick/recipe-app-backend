@@ -101,6 +101,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			})
 
 			r.Route("/estimates", func(r chi.Router) {
+				r.Get("/status", api.EstimateStatus)
 				r.Get("/store", api.GetEstimateStore)
 				r.Put("/store", api.SaveEstimateStore)
 				r.Post("/cost", api.EstimateCost)
