@@ -107,6 +107,22 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Post("/cost", api.EstimateCost)
 				r.Post("/products", api.EstimateProducts)
 			})
+
+			r.Route("/friends", func(r chi.Router) {
+				r.Get("/", api.ListFriends)
+				r.Get("/requests", api.ListFriendRequests)
+				r.Post("/requests", api.SendFriendRequest)
+				r.Post("/requests/{id}/accept", api.AcceptFriendRequest)
+				r.Post("/requests/{id}/decline", api.DeclineFriendRequest)
+				r.Delete("/{userId}", api.RemoveFriend)
+			})
+
+			r.Route("/notifications", func(r chi.Router) {
+				r.Get("/", api.ListNotifications)
+				r.Get("/unread-count", api.UnreadNotificationCount)
+				r.Post("/read-all", api.MarkAllNotificationsRead)
+				r.Post("/{id}/read", api.MarkNotificationRead)
+			})
 		})
 	})
 

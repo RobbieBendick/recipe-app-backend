@@ -148,3 +148,39 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS kroger_store_name TEXT NOT NULL DEFAU
 -- Recipe servings attached to a shopping list: { "recipe-uuid": 2, ... }
 ALTER TABLE shopping_lists ADD COLUMN IF NOT EXISTS recipe_counts JSONB NOT NULL DEFAULT '{}'::jsonb;
 
+CREATE TABLE IF NOT EXISTS friendships (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	requester_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	addressee_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	status TEXT NOT NULL DEFAULT 'pending',
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT friendships_no_self CHECK (requester_id <> addressee_id),
+	CONSTRAINT friendships_status_check CHECK (status IN ('pending', 'accepted', 'declined')),
+	CONSTRAINT friendships_pair_unique UNIQUE (requester_id, addressee_id)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS friendships_unordered_pair_idx
+	ON friendships (LEAST(requester_id, addressee_id), GREATEST(requester_id, addressee_id));
+
+CREATE INDEX IF NOT EXISTS friendships_requester_id_idx ON friendships (requester_id);
+CREATE INDEX IF NOT EXISTS friendships_addressee_id_idx ON friendships (addressee_id);
+
+CREATE TABLE IF NOT EXISTS notifications (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	type TEXT NOT NULL,
+	title TEXT NOT NULL,
+	body TEXT NOT NULL DEFAULT '',
+	data JSONB NOT NULL DEFAULT '{}'::jsonb,
+	read_at TIMESTAMPTZ,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS notifications_user_id_created_at_idx
+	ON notifications (user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS notifications_user_id_unread_idx
+	ON notifications (user_id)
+	WHERE read_at IS NULL;
+
