@@ -6,6 +6,7 @@ import (
 
 	"github.com/robbi/recipe-app-backend/pkg/db"
 	"github.com/robbi/recipe-app-backend/pkg/estimate"
+	"github.com/robbi/recipe-app-backend/pkg/kroger"
 )
 
 type costBody struct {
@@ -129,7 +130,14 @@ func (a *API) SaveEstimateStore(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	user, err := db.UpdateUserKrogerStore(r.Context(), a.DB, userID, zip, store.LocationID, storeDisplayName(store))
+	user, err := db.UpdateUserKrogerStore(
+		r.Context(),
+		a.DB,
+		userID,
+		zip,
+		kroger.NormalizeLocationID(store.LocationID),
+		storeDisplayName(store),
+	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save store preference")
 		return
@@ -204,12 +212,21 @@ func (a *API) EstimateCost(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "set a ZIP code or locationId to estimate prices")
 		return
 	}
+	locationID = kroger.NormalizeLocationID(locationID)
 
 	result, err := estimate.EstimateLines(r.Context(), a.Kroger, locationID, body.Lines)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to estimate cost: "+err.Error())
 		return
 	}
+	if store == nil {
+		store = &estimate.StoreInfo{LocationID: locationID}
+		if user.KrogerLocationID == locationID {
+			store.Name = user.KrogerStoreName
+			store.ZipCode = user.KrogerZip
+		}
+	}
+	store.LocationID = locationID
 
 	writeJSON(w, http.StatusOK, estimateResponse{
 		Result: result,

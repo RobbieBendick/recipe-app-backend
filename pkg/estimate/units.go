@@ -39,6 +39,9 @@ var densityGPerCup = map[string]float64{
 	"cornstarch":        128,
 	"baking powder":     220,
 	"baking soda":       220,
+	"vanilla extract":      208,
+	"pure vanilla extract": 208,
+	"vanilla":              208,
 }
 
 var packageSizeRE = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(fl\s*oz|fluid\s*ounces?|oz|ounces?|lb|lbs|pounds?|g|grams?|kg|kilograms?|ml|l|liters?|litres?|ct|count|ea|each)\b`)

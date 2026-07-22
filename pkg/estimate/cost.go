@@ -57,7 +57,7 @@ func NearestStore(ctx context.Context, client *kroger.Client, zip string) (*Stor
 	}
 	loc := locs[0]
 	return &StoreInfo{
-		LocationID: loc.LocationID,
+		LocationID: kroger.NormalizeLocationID(loc.LocationID),
 		Name:       loc.Name,
 		Chain:      loc.Chain,
 		City:       loc.Address.City,
