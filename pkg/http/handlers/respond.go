@@ -7,11 +7,14 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/robbi/recipe-app-backend/pkg/auth"
+	"github.com/robbi/recipe-app-backend/pkg/kroger"
 )
 
 type API struct {
-	DB   *pgxpool.Pool
-	Auth *auth.Service
+	DB         *pgxpool.Pool
+	Auth       *auth.Service
+	Kroger     *kroger.Client
+	DefaultZip string
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

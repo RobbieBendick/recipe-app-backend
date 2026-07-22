@@ -12,6 +12,7 @@ import (
 	"github.com/robbi/recipe-app-backend/pkg/auth"
 	"github.com/robbi/recipe-app-backend/pkg/config"
 	"github.com/robbi/recipe-app-backend/pkg/http/handlers"
+	"github.com/robbi/recipe-app-backend/pkg/kroger"
 )
 
 func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
@@ -22,7 +23,17 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		authService, _ = auth.NewService(fallbackJWTSecret(cfg), cfg.GoogleClientID)
 	}
 
-	api := &handlers.API{DB: pool, Auth: authService}
+	krogerClient := kroger.NewClient(cfg.KrogerClientID, cfg.KrogerClientSecret)
+	if !krogerClient.Configured() {
+		log.Printf("kroger credentials missing: price estimates disabled until KROGER_CLIENT_ID/SECRET are set")
+	}
+
+	api := &handlers.API{
+		DB:         pool,
+		Auth:       authService,
+		Kroger:     krogerClient,
+		DefaultZip: cfg.KrogerDefaultZip,
+	}
 	r := chi.NewRouter()
 
 	r.Use(middleware.RequestID)
@@ -87,6 +98,12 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 					r.Patch("/", api.TogglePantryStock)
 					r.Delete("/", api.DeletePantryItem)
 				})
+			})
+
+			r.Route("/estimates", func(r chi.Router) {
+				r.Get("/store", api.GetEstimateStore)
+				r.Put("/store", api.SaveEstimateStore)
+				r.Post("/cost", api.EstimateCost)
 			})
 		})
 	})

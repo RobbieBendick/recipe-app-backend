@@ -140,3 +140,8 @@ CREATE INDEX IF NOT EXISTS shopping_lists_updated_at_idx
 
 CREATE INDEX IF NOT EXISTS pantry_items_sort_order_idx
 	ON pantry_items (sort_order ASC, name ASC);
+
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kroger_zip TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kroger_location_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS kroger_store_name TEXT NOT NULL DEFAULT '';
+

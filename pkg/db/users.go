@@ -11,19 +11,26 @@ import (
 )
 
 type User struct {
-	ID           string    `json:"id"`
-	Email        string    `json:"email"`
-	PasswordHash *string   `json:"-"`
-	GoogleSub    *string   `json:"-"`
-	Name         string    `json:"name"`
-	AvatarURL    string    `json:"avatarUrl"`
-	CreatedAt    time.Time `json:"createdAt"`
-	UpdatedAt    time.Time `json:"updatedAt"`
+	ID               string    `json:"id"`
+	Email            string    `json:"email"`
+	PasswordHash     *string   `json:"-"`
+	GoogleSub        *string   `json:"-"`
+	Name             string    `json:"name"`
+	AvatarURL        string    `json:"avatarUrl"`
+	KrogerZip        string    `json:"krogerZip"`
+	KrogerLocationID string    `json:"krogerLocationId"`
+	KrogerStoreName  string    `json:"krogerStoreName"`
+	CreatedAt        time.Time `json:"createdAt"`
+	UpdatedAt        time.Time `json:"updatedAt"`
 }
+
+const userSelectCols = `id, email, password_hash, google_sub, name, avatar_url,
+	COALESCE(kroger_zip, ''), COALESCE(kroger_location_id, ''), COALESCE(kroger_store_name, ''),
+	created_at, updated_at`
 
 func GetUserByID(ctx context.Context, pool *pgxpool.Pool, id string) (*User, error) {
 	row := pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, google_sub, name, avatar_url, created_at, updated_at
+		SELECT `+userSelectCols+`
 		FROM users
 		WHERE id = $1
 	`, id)
@@ -32,7 +39,7 @@ func GetUserByID(ctx context.Context, pool *pgxpool.Pool, id string) (*User, err
 
 func GetUserByEmail(ctx context.Context, pool *pgxpool.Pool, email string) (*User, error) {
 	row := pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, google_sub, name, avatar_url, created_at, updated_at
+		SELECT `+userSelectCols+`
 		FROM users
 		WHERE lower(email) = lower($1)
 	`, strings.TrimSpace(email))
@@ -41,7 +48,7 @@ func GetUserByEmail(ctx context.Context, pool *pgxpool.Pool, email string) (*Use
 
 func GetUserByGoogleSub(ctx context.Context, pool *pgxpool.Pool, sub string) (*User, error) {
 	row := pool.QueryRow(ctx, `
-		SELECT id, email, password_hash, google_sub, name, avatar_url, created_at, updated_at
+		SELECT `+userSelectCols+`
 		FROM users
 		WHERE google_sub = $1
 	`, sub)
@@ -52,7 +59,7 @@ func CreateUserWithPassword(ctx context.Context, pool *pgxpool.Pool, email, pass
 	row := pool.QueryRow(ctx, `
 		INSERT INTO users (email, password_hash, name)
 		VALUES (lower($1), $2, $3)
-		RETURNING id, email, password_hash, google_sub, name, avatar_url, created_at, updated_at
+		RETURNING `+userSelectCols+`
 	`, strings.TrimSpace(email), passwordHash, strings.TrimSpace(name))
 	return scanUser(row)
 }
@@ -61,7 +68,7 @@ func CreateUserWithGoogle(ctx context.Context, pool *pgxpool.Pool, email, google
 	row := pool.QueryRow(ctx, `
 		INSERT INTO users (email, google_sub, name, avatar_url)
 		VALUES (lower($1), $2, $3, $4)
-		RETURNING id, email, password_hash, google_sub, name, avatar_url, created_at, updated_at
+		RETURNING `+userSelectCols+`
 	`, strings.TrimSpace(email), googleSub, strings.TrimSpace(name), strings.TrimSpace(avatarURL))
 	return scanUser(row)
 }
@@ -74,8 +81,21 @@ func LinkGoogleSub(ctx context.Context, pool *pgxpool.Pool, userID, googleSub, n
 			avatar_url = CASE WHEN $4 <> '' THEN $4 ELSE avatar_url END,
 			updated_at = now()
 		WHERE id = $1
-		RETURNING id, email, password_hash, google_sub, name, avatar_url, created_at, updated_at
+		RETURNING `+userSelectCols+`
 	`, userID, googleSub, strings.TrimSpace(name), strings.TrimSpace(avatarURL))
+	return scanUser(row)
+}
+
+func UpdateUserKrogerStore(ctx context.Context, pool *pgxpool.Pool, userID, zip, locationID, storeName string) (*User, error) {
+	row := pool.QueryRow(ctx, `
+		UPDATE users
+		SET kroger_zip = $2,
+			kroger_location_id = $3,
+			kroger_store_name = $4,
+			updated_at = now()
+		WHERE id = $1
+		RETURNING `+userSelectCols+`
+	`, userID, strings.TrimSpace(zip), strings.TrimSpace(locationID), strings.TrimSpace(storeName))
 	return scanUser(row)
 }
 
@@ -88,6 +108,9 @@ func scanUser(row scannable) (*User, error) {
 		&u.GoogleSub,
 		&u.Name,
 		&u.AvatarURL,
+		&u.KrogerZip,
+		&u.KrogerLocationID,
+		&u.KrogerStoreName,
 		&u.CreatedAt,
 		&u.UpdatedAt,
 	)
