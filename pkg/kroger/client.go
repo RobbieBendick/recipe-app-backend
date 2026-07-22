@@ -72,11 +72,21 @@ type Product struct {
 
 func NewClient(clientID, clientSecret string) *Client {
 	return &Client{
-		clientID:     strings.TrimSpace(clientID),
-		clientSecret: strings.TrimSpace(clientSecret),
+		clientID:     cleanCredential(clientID),
+		clientSecret: cleanCredential(clientSecret),
 		http:         &http.Client{Timeout: 20 * time.Second},
 		cache:        make(map[string]cacheEntry),
 	}
+}
+
+func cleanCredential(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) >= 2 {
+		if (value[0] == '"' && value[len(value)-1] == '"') || (value[0] == '\'' && value[len(value)-1] == '\'') {
+			value = strings.TrimSpace(value[1 : len(value)-1])
+		}
+	}
+	return value
 }
 
 func (c *Client) Configured() bool {
@@ -114,7 +124,14 @@ func (c *Client) token(ctx context.Context) (string, error) {
 
 	body, _ := io.ReadAll(res.Body)
 	if res.StatusCode >= 300 {
-		return "", fmt.Errorf("kroger token error (%d): %s", res.StatusCode, strings.TrimSpace(string(body)))
+		msg := strings.TrimSpace(string(body))
+		if res.StatusCode == http.StatusUnauthorized {
+			return "", fmt.Errorf(
+				"kroger rejected client credentials (401). Set KROGER_CLIENT_ID and KROGER_CLIENT_SECRET on the backend (Vercel), not the frontend, then redeploy. Details: %s",
+				msg,
+			)
+		}
+		return "", fmt.Errorf("kroger token error (%d): %s", res.StatusCode, msg)
 	}
 
 	var tr tokenResponse
