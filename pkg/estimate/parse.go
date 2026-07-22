@@ -152,6 +152,9 @@ func ParseLine(line string) ParsedLine {
 func SearchTerm(name string) string {
 	name = regexp.MustCompile(`\([^)]*\)`).ReplaceAllString(name, " ")
 	name = normalizeName(name)
-	// drop leading adjectives that hurt search less often — keep simple
+	switch name {
+	case "vanilla", "vanilla extract", "pure vanilla extract", "vanilla essence":
+		return "vanilla extract"
+	}
 	return name
 }

@@ -118,9 +118,10 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 		le.Reason = err.Error()
 		return le
 	}
+	products = filterRelevantProducts(parsed.Name, term, products)
 	if len(products) == 0 {
 		le.Status = StatusSkipped
-		le.Reason = "no products found"
+		le.Reason = "no matching products found"
 		return le
 	}
 
