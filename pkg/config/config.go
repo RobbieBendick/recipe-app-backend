@@ -13,6 +13,9 @@ type Config struct {
 	AllowedOrigin        string
 	JWTSecret            string
 	GoogleClientID       string
+	KrogerClientID       string
+	KrogerClientSecret   string
+	KrogerDefaultZip     string
 	HTTPWriteTimeoutSec  int
 	DatabasePoolMaxConns int
 }
@@ -25,6 +28,9 @@ func Load() Config {
 		AllowedOrigin:        getEnv("ALLOWED_ORIGIN", "*"),
 		JWTSecret:            getEnv("JWT_SECRET", ""),
 		GoogleClientID:       getEnv("GOOGLE_CLIENT_ID", ""),
+		KrogerClientID:       getEnv("KROGER_CLIENT_ID", ""),
+		KrogerClientSecret:   getEnv("KROGER_CLIENT_SECRET", ""),
+		KrogerDefaultZip:     getEnv("KROGER_DEFAULT_ZIP", ""),
 		HTTPWriteTimeoutSec:  getEnvInt("HTTP_WRITE_TIMEOUT_SEC", 120),
 		DatabasePoolMaxConns: getEnvInt("DATABASE_POOL_MAX_CONNS", 5),
 	}
