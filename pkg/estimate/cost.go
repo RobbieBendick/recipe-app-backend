@@ -106,6 +106,11 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 		le.Reason = "empty search term"
 		return le
 	}
+	if len(term) < 3 {
+		le.Status = StatusSkipped
+		le.Reason = "search term must be at least 3 characters"
+		return le
+	}
 
 	products, err := client.SearchProducts(ctx, term, locationID, 12)
 	if err != nil {

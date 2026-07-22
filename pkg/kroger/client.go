@@ -265,17 +265,23 @@ func (c *Client) SearchLocations(ctx context.Context, zip string, limit int) ([]
 	if err := c.getJSON(ctx, baseURL+"/locations", q, &payload); err != nil {
 		return nil, err
 	}
+	for i := range payload.Data {
+		payload.Data[i].LocationID = NormalizeLocationID(payload.Data[i].LocationID)
+	}
 	return payload.Data, nil
 }
 
 func (c *Client) SearchProducts(ctx context.Context, term, locationID string, limit int) ([]Product, error) {
 	term = strings.TrimSpace(term)
-	locationID = strings.TrimSpace(locationID)
-	if term == "" {
-		return nil, fmt.Errorf("search term is required")
+	locationID = NormalizeLocationID(locationID)
+	if len(term) < 3 {
+		return nil, fmt.Errorf("search term must be at least 3 characters (got %q)", term)
 	}
 	if locationID == "" {
 		return nil, fmt.Errorf("locationId is required")
+	}
+	if len(locationID) != 8 {
+		return nil, fmt.Errorf("locationId must be 8 characters (got %q)", locationID)
 	}
 	if limit <= 0 || limit > 50 {
 		limit = 10
@@ -307,6 +313,27 @@ func (c *Client) SearchProducts(ctx context.Context, term, locationID string, li
 	c.cacheMu.Unlock()
 
 	return payload.Data, nil
+}
+
+// NormalizeLocationID pads numeric location IDs to the 8 characters Products API requires.
+func NormalizeLocationID(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	if len(id) < 8 && isAllDigits(id) {
+		return strings.Repeat("0", 8-len(id)) + id
+	}
+	return id
+}
+
+func isAllDigits(value string) bool {
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // EffectivePrice returns promo if set and positive, otherwise regular.
