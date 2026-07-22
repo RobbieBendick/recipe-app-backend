@@ -35,7 +35,7 @@ var (
 		"ct": "count", "count": "count", "each": "count",
 	}
 	unitPattern = buildUnitPattern()
-	withUnitRE  = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s+(` + unitPattern + `)\b\.?(?:\s+of)?\s+(.+)$`)
+	withUnitRE  = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s*(` + unitPattern + `)\b\.?(?:\s+of)?\s+(.+)$`)
 	qtyOnlyRE   = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s+(.+)$`)
 	emojiRE     = regexp.MustCompile(`^[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]+\s*`)
 )

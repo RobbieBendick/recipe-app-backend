@@ -23,6 +23,7 @@ type LineEstimate struct {
 	SearchTerm         string     `json:"searchTerm,omitempty"`
 	Grams              float64    `json:"grams,omitempty"`
 	Count              float64    `json:"count,omitempty"`
+	PackagesNeeded     float64    `json:"packagesNeeded,omitempty"`
 	UnitPricePerGram   float64    `json:"unitPricePerGram,omitempty"`
 	UnitPricePerCount  float64    `json:"unitPricePerCount,omitempty"`
 	Estimate           float64    `json:"estimate,omitempty"`
@@ -34,15 +35,16 @@ type LineEstimate struct {
 
 // ProductOption is a Kroger hit the user can pick for an ingredient line.
 type ProductOption struct {
-	ProductID          string  `json:"productId"`
-	Description        string  `json:"description"`
-	Brand              string  `json:"brand,omitempty"`
-	Size               string  `json:"size"`
-	Price              float64 `json:"price"`
-	Estimate           float64 `json:"estimate"`
-	UnitPricePerGram   float64 `json:"unitPricePerGram,omitempty"`
-	UnitPricePerCount  float64 `json:"unitPricePerCount,omitempty"`
-	Mode               string  `json:"mode"` // "weight" | "count"
+	ProductID         string  `json:"productId"`
+	Description       string  `json:"description"`
+	Brand             string  `json:"brand,omitempty"`
+	Size              string  `json:"size"`
+	Price             float64 `json:"price"`
+	Estimate          float64 `json:"estimate"`
+	PackagesNeeded    float64 `json:"packagesNeeded,omitempty"`
+	UnitPricePerGram  float64 `json:"unitPricePerGram,omitempty"`
+	UnitPricePerCount float64 `json:"unitPricePerCount,omitempty"`
+	Mode              string  `json:"mode"` // "weight" | "count"
 }
 
 type ProductOptionsResult struct {
@@ -234,10 +236,12 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 	}
 	le.Grams = round3(gramsNeeded)
 
+	bestCost := 0.0
 	bestPricePerG := 0.0
 	var best kroger.Product
 	var bestSize string
 	var bestPrice float64
+	var bestPkgs float64
 	found := false
 
 	for _, p := range products {
@@ -253,12 +257,16 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 		if ppg <= 0 {
 			continue
 		}
-		if !found || ppg < bestPricePerG {
+		pkgs := packagesNeeded(gramsNeeded, pkgG)
+		cost := pkgs * price
+		if !found || cost < bestCost || (cost == bestCost && ppg < bestPricePerG) {
 			found = true
+			bestCost = cost
 			bestPricePerG = ppg
 			best = p
 			bestSize = size
 			bestPrice = price
+			bestPkgs = pkgs
 		}
 	}
 
@@ -270,7 +278,8 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 
 	le.Status = StatusOK
 	le.UnitPricePerGram = round6(bestPricePerG)
-	le.Estimate = roundMoney(gramsNeeded * bestPricePerG)
+	le.PackagesNeeded = bestPkgs
+	le.Estimate = roundMoney(bestCost)
 	le.ProductID = best.ProductID
 	le.ProductDescription = best.Description
 	le.ProductSize = bestSize
@@ -285,10 +294,12 @@ func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate
 	}
 	le.Count = need
 
+	bestCost := 0.0
 	bestPer := 0.0
 	var best kroger.Product
 	var bestSize string
 	var bestPrice float64
+	var bestPkgs float64
 	found := false
 
 	for _, p := range products {
@@ -300,22 +311,24 @@ func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate
 		if !ok {
 			continue
 		}
-		per := 0.0
+		pkgCount := 1.0
 		if isCount && count > 0 {
-			per = DollarPerCount(price, count)
-		} else {
-			per = price
-			count = 1
+			pkgCount = count
 		}
-		if per <= 0 {
+		pkgs := packagesNeeded(need, pkgCount)
+		cost := pkgs * price
+		per := DollarPerCount(price, pkgCount)
+		if per <= 0 || pkgs <= 0 {
 			continue
 		}
-		if !found || per < bestPer {
+		if !found || cost < bestCost || (cost == bestCost && per < bestPer) {
 			found = true
+			bestCost = cost
 			bestPer = per
 			best = p
 			bestSize = size
 			bestPrice = price
+			bestPkgs = pkgs
 		}
 	}
 
@@ -327,7 +340,8 @@ func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate
 
 	le.Status = StatusOK
 	le.UnitPricePerCount = round6(bestPer)
-	le.Estimate = roundMoney(need * bestPer)
+	le.PackagesNeeded = bestPkgs
+	le.Estimate = roundMoney(bestCost)
 	le.ProductID = best.ProductID
 	le.ProductDescription = best.Description
 	le.ProductSize = bestSize
@@ -357,18 +371,19 @@ func productOption(parsed ParsedLine, p kroger.Product, countBased bool, gramsNe
 		if !ok {
 			return ProductOption{}, false
 		}
-		per := 0.0
+		pkgCount := 1.0
 		if isCount && count > 0 {
-			per = DollarPerCount(price, count)
-		} else {
-			per = price
+			pkgCount = count
 		}
-		if per <= 0 {
+		pkgs := packagesNeeded(need, pkgCount)
+		per := DollarPerCount(price, pkgCount)
+		if per <= 0 || pkgs <= 0 {
 			return ProductOption{}, false
 		}
 		opt.Mode = "count"
 		opt.UnitPricePerCount = round6(per)
-		opt.Estimate = roundMoney(need * per)
+		opt.PackagesNeeded = pkgs
+		opt.Estimate = roundMoney(pkgs * price)
 		return opt, true
 	}
 
@@ -383,9 +398,11 @@ func productOption(parsed ParsedLine, p kroger.Product, countBased bool, gramsNe
 	if ppg <= 0 {
 		return ProductOption{}, false
 	}
+	pkgs := packagesNeeded(gramsNeeded, pkgG)
 	opt.Mode = "weight"
 	opt.UnitPricePerGram = round6(ppg)
-	opt.Estimate = roundMoney(gramsNeeded * ppg)
+	opt.PackagesNeeded = pkgs
+	opt.Estimate = roundMoney(pkgs * price)
 	return opt, true
 }
 
@@ -394,6 +411,14 @@ func productKey(p kroger.Product) string {
 		return p.ProductID
 	}
 	return p.UPC + "|" + p.Description
+}
+
+// packagesNeeded is how many whole packages to buy to cover needAmount of the same unit.
+func packagesNeeded(needAmount, packageAmount float64) float64 {
+	if needAmount <= 0 || packageAmount <= 0 {
+		return 0
+	}
+	return math.Ceil((needAmount / packageAmount) - 1e-9)
 }
 
 func roundMoney(v float64) float64 {
