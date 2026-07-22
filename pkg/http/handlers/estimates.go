@@ -19,6 +19,12 @@ type storeBody struct {
 	Zip string `json:"zip"`
 }
 
+type productsBody struct {
+	Line       string `json:"line"`
+	LocationID string `json:"locationId"`
+	Zip        string `json:"zip"`
+}
+
 type estimateResponse struct {
 	*estimate.Result
 	Store *estimate.StoreInfo `json:"store,omitempty"`
@@ -232,6 +238,94 @@ func (a *API) EstimateCost(w http.ResponseWriter, r *http.Request) {
 		Result: result,
 		Store:  store,
 	})
+}
+
+func (a *API) EstimateProducts(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	if a.Kroger == nil || !a.Kroger.Configured() {
+		writeError(w, http.StatusServiceUnavailable, "Kroger price estimates are not configured")
+		return
+	}
+
+	var body productsBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	line := strings.TrimSpace(body.Line)
+	if line == "" {
+		writeError(w, http.StatusBadRequest, "line is required")
+		return
+	}
+
+	user, err := db.GetUserByID(r.Context(), a.DB, userID)
+	if err != nil || user == nil {
+		writeError(w, http.StatusInternalServerError, "failed to load profile")
+		return
+	}
+
+	locationID, _, errResp := a.resolveLocation(r, user, body.LocationID, body.Zip)
+	if errResp != "" {
+		if strings.HasPrefix(errResp, "404:") {
+			writeError(w, http.StatusNotFound, strings.TrimPrefix(errResp, "404:"))
+			return
+		}
+		if strings.HasPrefix(errResp, "502:") {
+			writeError(w, http.StatusBadGateway, strings.TrimPrefix(errResp, "502:"))
+			return
+		}
+		writeError(w, http.StatusBadRequest, errResp)
+		return
+	}
+
+	result, err := estimate.ListProductOptions(r.Context(), a.Kroger, locationID, line)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "failed to search products: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+// resolveLocation returns a normalized locationId. errResp is empty on success.
+func (a *API) resolveLocation(r *http.Request, user *db.User, locationID, zip string) (string, *estimate.StoreInfo, string) {
+	locationID = strings.TrimSpace(locationID)
+	zip = strings.TrimSpace(zip)
+	var store *estimate.StoreInfo
+
+	if locationID == "" {
+		if zip == "" {
+			zip = strings.TrimSpace(user.KrogerZip)
+		}
+		if zip == "" {
+			zip = strings.TrimSpace(a.DefaultZip)
+		}
+		if user.KrogerLocationID != "" && (zip == "" || zip == user.KrogerZip) {
+			locationID = user.KrogerLocationID
+			store = &estimate.StoreInfo{
+				LocationID: user.KrogerLocationID,
+				Name:       user.KrogerStoreName,
+				ZipCode:    user.KrogerZip,
+			}
+		} else if zip != "" {
+			s, err := estimate.NearestStore(r.Context(), a.Kroger, zip)
+			if err != nil {
+				return "", nil, "502:failed to look up Kroger store: " + err.Error()
+			}
+			if s == nil {
+				return "", nil, "404:no Kroger store found near that ZIP"
+			}
+			store = s
+			locationID = s.LocationID
+		}
+	}
+
+	if locationID == "" {
+		return "", nil, "set a ZIP code or locationId to estimate prices"
+	}
+	return kroger.NormalizeLocationID(locationID), store, ""
 }
 
 func storeDisplayName(store *estimate.StoreInfo) string {
