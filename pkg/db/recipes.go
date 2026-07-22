@@ -2,7 +2,9 @@ package db
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -37,19 +39,21 @@ type ShoppingListItem struct {
 }
 
 type ShoppingList struct {
-	ID        string             `json:"id"`
-	Title     string             `json:"title"`
-	Emoji     string             `json:"emoji"`
-	Items     []ShoppingListItem `json:"items"`
-	CreatedAt time.Time          `json:"createdAt"`
-	UpdatedAt time.Time          `json:"updatedAt"`
+	ID           string             `json:"id"`
+	Title        string             `json:"title"`
+	Emoji        string             `json:"emoji"`
+	Items        []ShoppingListItem `json:"items"`
+	RecipeCounts map[string]int     `json:"recipeCounts"`
+	CreatedAt    time.Time          `json:"createdAt"`
+	UpdatedAt    time.Time          `json:"updatedAt"`
 }
 
 type ShoppingListInput struct {
-	Title          string   `json:"title"`
-	Emoji          string   `json:"emoji"`
-	Items          []string `json:"items"`
-	SourceRecipeID *string  `json:"sourceRecipeId,omitempty"`
+	Title          string         `json:"title"`
+	Emoji          string         `json:"emoji"`
+	Items          []string       `json:"items"`
+	SourceRecipeID *string        `json:"sourceRecipeId,omitempty"`
+	RecipeCounts   map[string]int `json:"recipeCounts,omitempty"`
 }
 
 func ListRecipes(ctx context.Context, pool *pgxpool.Pool, userID string) ([]Recipe, error) {
@@ -162,7 +166,7 @@ func scanRecipe(row scannable) (Recipe, error) {
 
 func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool, userID string) ([]ShoppingList, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, title, emoji, created_at, updated_at
+		SELECT id, title, emoji, COALESCE(recipe_counts, '{}'::jsonb), created_at, updated_at
 		FROM shopping_lists
 		WHERE user_id = $1
 		ORDER BY updated_at DESC
@@ -175,9 +179,10 @@ func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool, userID string) (
 	var out []ShoppingList
 	for rows.Next() {
 		var list ShoppingList
-		if err := rows.Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt); err != nil {
+		if err := rows.Scan(&list.ID, &list.Title, &list.Emoji, &list.RecipeCounts, &list.CreatedAt, &list.UpdatedAt); err != nil {
 			return nil, err
 		}
+		normalizeRecipeCounts(&list)
 		items, err := listItems(ctx, pool, list.ID)
 		if err != nil {
 			return nil, err
@@ -194,16 +199,17 @@ func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool, userID string) (
 func GetShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string) (*ShoppingList, error) {
 	var list ShoppingList
 	err := pool.QueryRow(ctx, `
-		SELECT id, title, emoji, created_at, updated_at
+		SELECT id, title, emoji, COALESCE(recipe_counts, '{}'::jsonb), created_at, updated_at
 		FROM shopping_lists
 		WHERE id = $1 AND user_id = $2
-	`, id, userID).Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt)
+	`, id, userID).Scan(&list.ID, &list.Title, &list.Emoji, &list.RecipeCounts, &list.CreatedAt, &list.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
 	}
+	normalizeRecipeCounts(&list)
 	items, err := listItems(ctx, pool, id)
 	if err != nil {
 		return nil, err
@@ -223,16 +229,29 @@ func CreateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID string, 
 	if emoji == "" {
 		emoji = "🛒"
 	}
+	counts := cleanRecipeCounts(in.RecipeCounts)
+	if in.SourceRecipeID != nil && *in.SourceRecipeID != "" {
+		var decoded map[string]int
+		_ = json.Unmarshal(counts, &decoded)
+		if decoded == nil {
+			decoded = map[string]int{}
+		}
+		if decoded[*in.SourceRecipeID] <= 0 {
+			decoded[*in.SourceRecipeID] = 1
+		}
+		counts = cleanRecipeCounts(decoded)
+	}
 
 	var list ShoppingList
 	err = tx.QueryRow(ctx, `
-		INSERT INTO shopping_lists (user_id, title, emoji)
-		VALUES ($1, $2, $3)
-		RETURNING id, title, emoji, created_at, updated_at
-	`, userID, in.Title, emoji).Scan(&list.ID, &list.Title, &list.Emoji, &list.CreatedAt, &list.UpdatedAt)
+		INSERT INTO shopping_lists (user_id, title, emoji, recipe_counts)
+		VALUES ($1, $2, $3, COALESCE($4::jsonb, '{}'::jsonb))
+		RETURNING id, title, emoji, COALESCE(recipe_counts, '{}'::jsonb), created_at, updated_at
+	`, userID, in.Title, emoji, counts).Scan(&list.ID, &list.Title, &list.Emoji, &list.RecipeCounts, &list.CreatedAt, &list.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
+	normalizeRecipeCounts(&list)
 
 	for i, text := range in.Items {
 		_, err := tx.Exec(ctx, `
@@ -261,12 +280,13 @@ func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id stri
 	if emoji == "" {
 		emoji = "🛒"
 	}
+	counts := cleanRecipeCounts(in.RecipeCounts)
 
 	tag, err := tx.Exec(ctx, `
 		UPDATE shopping_lists
-		SET title = $3, emoji = $4, updated_at = now()
+		SET title = $3, emoji = $4, recipe_counts = COALESCE($5::jsonb, '{}'::jsonb), updated_at = now()
 		WHERE id = $1 AND user_id = $2
-	`, id, userID, in.Title, emoji)
+	`, id, userID, in.Title, emoji, counts)
 	if err != nil {
 		return nil, err
 	}
@@ -392,6 +412,7 @@ func CreateShoppingListFromRecipe(ctx context.Context, pool *pgxpool.Pool, userI
 		Emoji:          emoji,
 		Items:          recipe.Ingredients,
 		SourceRecipeID: &sourceID,
+		RecipeCounts:   map[string]int{sourceID: 1},
 	})
 }
 
@@ -430,7 +451,19 @@ func AddRecipeToShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, li
 		next++
 	}
 
-	_, _ = pool.Exec(ctx, `UPDATE shopping_lists SET updated_at = now() WHERE id = $1 AND user_id = $2`, listID, userID)
+	counts := list.RecipeCounts
+	if counts == nil {
+		counts = map[string]int{}
+	}
+	counts[sourceID] = counts[sourceID] + 1
+	_, err = pool.Exec(ctx, `
+		UPDATE shopping_lists
+		SET recipe_counts = COALESCE($3::jsonb, '{}'::jsonb), updated_at = now()
+		WHERE id = $1 AND user_id = $2
+	`, listID, userID, cleanRecipeCounts(counts))
+	if err != nil {
+		return nil, err
+	}
 	return GetShoppingList(ctx, pool, userID, listID)
 }
 
@@ -458,4 +491,26 @@ func listItems(ctx context.Context, pool *pgxpool.Pool, listID string) ([]Shoppi
 		items = []ShoppingListItem{}
 	}
 	return items, rows.Err()
+}
+
+func normalizeRecipeCounts(list *ShoppingList) {
+	if list.RecipeCounts == nil {
+		list.RecipeCounts = map[string]int{}
+	}
+}
+
+func cleanRecipeCounts(counts map[string]int) []byte {
+	cleaned := map[string]int{}
+	for id, n := range counts {
+		id = strings.TrimSpace(id)
+		if id == "" || n <= 0 {
+			continue
+		}
+		cleaned[id] = n
+	}
+	raw, err := json.Marshal(cleaned)
+	if err != nil {
+		return []byte("{}")
+	}
+	return raw
 }

@@ -148,13 +148,9 @@ func ParseLine(line string) ParsedLine {
 	}
 }
 
-// SearchTerm strips parenthetical notes for cleaner Kroger queries.
+// SearchTerm strips parenthetical notes and applies ingredient search aliases.
 func SearchTerm(name string) string {
 	name = regexp.MustCompile(`\([^)]*\)`).ReplaceAllString(name, " ")
 	name = normalizeName(name)
-	switch name {
-	case "vanilla", "vanilla extract", "pure vanilla extract", "vanilla essence":
-		return "vanilla extract"
-	}
-	return name
+	return resolveSearchTerm(name)
 }

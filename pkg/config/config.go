@@ -32,7 +32,7 @@ func Load() Config {
 		KrogerClientID:       getEnv("KROGER_CLIENT_ID", ""),
 		KrogerClientSecret:   getEnv("KROGER_CLIENT_SECRET", ""),
 		KrogerAPIBaseURL:     getEnv("KROGER_API_BASE_URL", "https://api-ce.kroger.com/v1"),
-		KrogerDefaultZip:     getEnv("KROGER_DEFAULT_ZIP", ""),
+		KrogerDefaultZip:     getEnv("KROGER_DEFAULT_ZIP", "45202"),
 		HTTPWriteTimeoutSec:  getEnvInt("HTTP_WRITE_TIMEOUT_SEC", 120),
 		DatabasePoolMaxConns: getEnvInt("DATABASE_POOL_MAX_CONNS", 5),
 	}

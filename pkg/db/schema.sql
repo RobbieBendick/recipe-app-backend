@@ -145,3 +145,6 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS kroger_zip TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS kroger_location_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS kroger_store_name TEXT NOT NULL DEFAULT '';
 
+-- Recipe servings attached to a shopping list: { "recipe-uuid": 2, ... }
+ALTER TABLE shopping_lists ADD COLUMN IF NOT EXISTS recipe_counts JSONB NOT NULL DEFAULT '{}'::jsonb;
+

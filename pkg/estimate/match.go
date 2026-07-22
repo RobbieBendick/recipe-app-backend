@@ -15,22 +15,43 @@ func productScore(ingredientName, searchTerm string, p kroger.Product) int {
 	}
 	name := normalizeName(ingredientName)
 	term := normalizeName(searchTerm)
+	rule := ruleFor(name)
+	if rule == nil {
+		rule = ruleFor(term)
+	}
 
-	// Vanilla in recipes means extract, not ice cream / pudding / yogurt.
-	if isVanillaExtractNeed(name, term) {
-		if containsAny(desc, "ice cream", "frozen dairy", "yogurt", "pudding", "creamer", "coffee creamer", "candle", "air freshener", "protein") {
+	if rule != nil {
+		if containsAny(desc, rule.Exclude...) {
 			return -1
 		}
-		if strings.Contains(desc, "extract") {
-			return 100
+		score := 0
+		preferred := false
+		for _, pref := range rule.Prefer {
+			pref = strings.ToLower(pref)
+			if pref != "" && strings.Contains(desc, pref) {
+				preferred = true
+				score += 50
+			}
 		}
-		if strings.Contains(desc, "vanilla") && !containsAny(desc, "flavor", "flavored") {
-			return 40
+		// Require at least one search-term token in the description.
+		tokens := strings.Fields(term)
+		matched := 0
+		for _, tok := range tokens {
+			if len(tok) < 3 {
+				continue
+			}
+			if strings.Contains(desc, tok) {
+				matched++
+				score += 15
+			}
 		}
-		if strings.Contains(desc, "vanilla") {
-			return 10
+		if matched == 0 && !preferred {
+			return -1
 		}
-		return -1
+		if preferred {
+			score += 40
+		}
+		return score
 	}
 
 	score := 0
@@ -51,23 +72,16 @@ func productScore(ingredientName, searchTerm string, p kroger.Product) int {
 	if matched == 0 {
 		return -1
 	}
-	// Prefer simpler pantry items over prepared foods when scoring is close.
-	if containsAny(desc, "ice cream", "frozen meal", "pizza", "cookie", "cake mix") {
+	if containsAny(desc, defaultPreparedFoodExclude...) {
 		score -= 50
 	}
 	return score
 }
 
-func isVanillaExtractNeed(name, term string) bool {
-	return name == "vanilla" ||
-		name == "vanilla essence" ||
-		strings.Contains(name, "vanilla extract") ||
-		term == "vanilla extract"
-}
-
 func containsAny(haystack string, needles ...string) bool {
 	for _, n := range needles {
-		if strings.Contains(haystack, n) {
+		n = strings.ToLower(strings.TrimSpace(n))
+		if n != "" && strings.Contains(haystack, n) {
 			return true
 		}
 	}
@@ -75,13 +89,12 @@ func containsAny(haystack string, needles ...string) bool {
 }
 
 func filterRelevantProducts(ingredientName, searchTerm string, products []kroger.Product) []kroger.Product {
-	out := make([]kroger.Product, 0, len(products))
-	bestScore := -1
 	type scored struct {
 		p     kroger.Product
 		score int
 	}
 	ranked := make([]scored, 0, len(products))
+	bestScore := -1
 	for _, p := range products {
 		s := productScore(ingredientName, searchTerm, p)
 		if s < 0 {
@@ -92,13 +105,16 @@ func filterRelevantProducts(ingredientName, searchTerm string, products []kroger
 			bestScore = s
 		}
 	}
-	// Keep only top-tier matches when we have strong hits (e.g. "extract").
+
+	// When we have strong preferred matches, keep only that tier.
 	threshold := 0
 	if bestScore >= 80 {
 		threshold = 80
 	} else if bestScore >= 40 {
 		threshold = 40
 	}
+
+	out := make([]kroger.Product, 0, len(ranked))
 	for _, item := range ranked {
 		if item.score >= threshold {
 			out = append(out, item.p)
