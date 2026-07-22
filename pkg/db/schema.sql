@@ -231,3 +231,21 @@ CREATE TABLE IF NOT EXISTS friend_nicknames (
 	CONSTRAINT friend_nicknames_no_self CHECK (user_id <> friend_user_id)
 );
 
+CREATE TABLE IF NOT EXISTS shared_pantries (
+	id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+	user_a UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	user_b UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	CONSTRAINT shared_pantries_ordered CHECK (user_a < user_b),
+	CONSTRAINT shared_pantries_pair_unique UNIQUE (user_a, user_b)
+);
+
+CREATE INDEX IF NOT EXISTS shared_pantries_user_a_idx ON shared_pantries (user_a);
+CREATE INDEX IF NOT EXISTS shared_pantries_user_b_idx ON shared_pantries (user_b);
+
+ALTER TABLE pantry_items ADD COLUMN IF NOT EXISTS shared_pantry_id UUID REFERENCES shared_pantries (id) ON DELETE CASCADE;
+
+CREATE INDEX IF NOT EXISTS pantry_items_shared_pantry_id_idx
+	ON pantry_items (shared_pantry_id)
+	WHERE shared_pantry_id IS NOT NULL;
+

@@ -121,8 +121,13 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Post("/requests/{id}/accept", api.AcceptFriendRequest)
 				r.Post("/requests/{id}/decline", api.DeclineFriendRequest)
 				r.Get("/{userId}/shared-list", api.GetOrCreateSharedShoppingList)
+				r.Get("/{userId}/shared-pantry", api.GetOrCreateSharedPantry)
 				r.Put("/{userId}/nickname", api.SetFriendNickname)
 				r.Delete("/{userId}", api.RemoveFriend)
+			})
+
+			r.Route("/shared-pantries", func(r chi.Router) {
+				r.Get("/{id}", api.GetSharedPantry)
 			})
 
 			r.Route("/notifications", func(r chi.Router) {

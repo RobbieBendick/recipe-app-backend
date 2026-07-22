@@ -222,6 +222,53 @@ func (a *API) GetOrCreateSharedShoppingList(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, status, list)
 }
 
+func (a *API) GetOrCreateSharedPantry(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	friendID := chi.URLParam(r, "userId")
+	pantry, created, err := db.GetOrCreateSharedPantry(r.Context(), a.DB, userID, friendID)
+	if err != nil {
+		switch {
+		case errors.Is(err, db.ErrNotFriends):
+			writeError(w, http.StatusForbidden, "you can only share a pantry with friends")
+		case errors.Is(err, db.ErrCannotFriendSelf):
+			writeError(w, http.StatusBadRequest, "you can't open a shared pantry with yourself")
+		default:
+			writeError(w, http.StatusInternalServerError, "failed to open shared pantry")
+		}
+		return
+	}
+	if pantry == nil {
+		writeError(w, http.StatusNotFound, "shared pantry not found")
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeJSON(w, status, pantry)
+}
+
+func (a *API) GetSharedPantry(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	pantry, err := db.GetSharedPantry(r.Context(), a.DB, userID, id)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load shared pantry")
+		return
+	}
+	if pantry == nil {
+		writeError(w, http.StatusNotFound, "shared pantry not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, pantry)
+}
+
 type setNicknameBody struct {
 	Nickname string `json:"nickname"`
 }

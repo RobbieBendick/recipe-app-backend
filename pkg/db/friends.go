@@ -222,6 +222,9 @@ func RemoveFriendship(ctx context.Context, pool *pgxpool.Pool, userID, friendUse
 	if err := DeleteSharedShoppingListForPair(ctx, pool, userID, friendUserID); err != nil {
 		return err
 	}
+	if err := DeleteSharedPantryForPair(ctx, pool, userID, friendUserID); err != nil {
+		return err
+	}
 	_, _ = pool.Exec(ctx, `
 		DELETE FROM friend_nicknames
 		WHERE (user_id = $1 AND friend_user_id = $2)

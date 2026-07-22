@@ -15,7 +15,8 @@ const (
 	NotificationFriendAccepted      = "friend_accepted"
 	NotificationRecipeShare         = "recipe_share"
 	NotificationRecipeAccepted      = "recipe_share_accepted"
-	NotificationSharedShoppingList  = "shared_shopping_list"
+	NotificationSharedShoppingList = "shared_shopping_list"
+	NotificationSharedPantry       = "shared_pantry"
 )
 
 type Notification struct {

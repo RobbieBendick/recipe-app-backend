@@ -25,7 +25,10 @@ func (a *API) CreatePantryItem(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var in db.PantryItemInput
+	var in struct {
+		db.PantryItemInput
+		SharedPantryID string `json:"sharedPantryId"`
+	}
 	if err := decodeJSON(r, &in); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -36,9 +39,18 @@ func (a *API) CreatePantryItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	item, err := db.CreatePantryItem(r.Context(), a.DB, userID, in)
+	var sharedID *string
+	if id := trimNonEmpty(in.SharedPantryID); id != "" {
+		sharedID = &id
+	}
+
+	item, err := db.CreatePantryItemIn(r.Context(), a.DB, userID, in.PantryItemInput, sharedID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create pantry item")
+		return
+	}
+	if item == nil {
+		writeError(w, http.StatusNotFound, "shared pantry not found")
 		return
 	}
 	writeJSON(w, http.StatusCreated, item)
