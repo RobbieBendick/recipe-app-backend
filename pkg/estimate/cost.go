@@ -114,7 +114,8 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 }
 
 // ListProductOptions returns priced Kroger products for an ingredient line.
-func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, raw string) (*ProductOptionsResult, error) {
+// searchOverride, when non-empty, replaces the derived SearchTerm for the Kroger query.
+func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, raw, searchOverride string) (*ProductOptionsResult, error) {
 	raw = strings.TrimSpace(raw)
 	parsed := ParseLine(raw)
 	out := &ProductOptionsResult{
@@ -124,7 +125,10 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 	if parsed.Name == "" {
 		return out, nil
 	}
-	term := SearchTerm(parsed.Name)
+	term := strings.TrimSpace(searchOverride)
+	if term == "" {
+		term = SearchTerm(parsed.Name)
+	}
 	out.SearchTerm = term
 	if term == "" || len(term) < 3 {
 		return out, nil

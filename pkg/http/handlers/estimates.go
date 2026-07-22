@@ -21,6 +21,7 @@ type storeBody struct {
 
 type productsBody struct {
 	Line       string `json:"line"`
+	SearchTerm string `json:"searchTerm"`
 	LocationID string `json:"locationId"`
 	Zip        string `json:"zip"`
 }
@@ -281,7 +282,7 @@ func (a *API) EstimateProducts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := estimate.ListProductOptions(r.Context(), a.Kroger, locationID, line)
+	result, err := estimate.ListProductOptions(r.Context(), a.Kroger, locationID, line, body.SearchTerm)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to search products: "+err.Error())
 		return
