@@ -10,10 +10,11 @@ import (
 )
 
 type costBody struct {
-	Lines      []string               `json:"lines"`
-	LocationID string                 `json:"locationId"`
-	Zip        string                 `json:"zip"`
+	Lines      []string                `json:"lines"`
+	LocationID string                  `json:"locationId"`
+	Zip        string                  `json:"zip"`
 	Overrides  []estimate.LineOverride `json:"overrides"`
+	Pricing    string                  `json:"pricing"`
 }
 
 type storeBody struct {
@@ -25,6 +26,7 @@ type productsBody struct {
 	SearchTerm string `json:"searchTerm"`
 	LocationID string `json:"locationId"`
 	Zip        string `json:"zip"`
+	Pricing    string `json:"pricing"`
 }
 
 type estimateResponse struct {
@@ -222,7 +224,7 @@ func (a *API) EstimateCost(w http.ResponseWriter, r *http.Request) {
 	}
 	locationID = kroger.NormalizeLocationID(locationID)
 
-	result, err := estimate.EstimateLines(r.Context(), a.Kroger, locationID, body.Lines, body.Overrides)
+	result, err := estimate.EstimateLines(r.Context(), a.Kroger, locationID, body.Lines, body.Overrides, estimate.NormalizePricingMode(body.Pricing))
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to estimate cost: "+err.Error())
 		return
@@ -283,7 +285,7 @@ func (a *API) EstimateProducts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := estimate.ListProductOptions(r.Context(), a.Kroger, locationID, line, body.SearchTerm)
+	result, err := estimate.ListProductOptions(r.Context(), a.Kroger, locationID, line, body.SearchTerm, estimate.NormalizePricingMode(body.Pricing))
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to search products: "+err.Error())
 		return

@@ -24,3 +24,14 @@ func TestPackagesNeeded(t *testing.T) {
 		t.Fatalf("packagesNeeded=%v want 3", got)
 	}
 }
+
+func TestLineCostPortionVsPackages(t *testing.T) {
+	portion := lineCost(PricingPortion, 0.12, 3.99)
+	if portion != 0.12 {
+		t.Fatalf("portion=%v want 0.12", portion)
+	}
+	packs := lineCost(PricingPackages, 0.12, 3.99)
+	if packs != 3.99 {
+		t.Fatalf("packages=%v want 3.99", packs)
+	}
+}

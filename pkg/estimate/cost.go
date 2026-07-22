@@ -99,7 +99,25 @@ func NearestStore(ctx context.Context, client *kroger.Client, zip string) (*Stor
 	}, nil
 }
 
-func EstimateLines(ctx context.Context, client *kroger.Client, locationID string, lines []string, overrides []LineOverride) (*Result, error) {
+// PricingMode controls how package prices become a line estimate.
+type PricingMode string
+
+const (
+	// PricingPortion charges for the amount used (recipes).
+	PricingPortion PricingMode = "portion"
+	// PricingPackages rounds up to whole packages you must buy (shopping lists).
+	PricingPackages PricingMode = "packages"
+)
+
+func NormalizePricingMode(value string) PricingMode {
+	if strings.EqualFold(strings.TrimSpace(value), string(PricingPackages)) {
+		return PricingPackages
+	}
+	return PricingPortion
+}
+
+func EstimateLines(ctx context.Context, client *kroger.Client, locationID string, lines []string, overrides []LineOverride, mode PricingMode) (*Result, error) {
+	mode = NormalizePricingMode(string(mode))
 	byInput := map[string]LineOverride{}
 	for _, o := range overrides {
 		key := overrideKey(o.Input)
@@ -125,7 +143,7 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 			cp := o
 			ov = &cp
 		}
-		line := estimateOne(ctx, client, locationID, raw, ov)
+		line := estimateOne(ctx, client, locationID, raw, ov, mode)
 		out.Lines = append(out.Lines, line)
 		if line.Status == StatusOK {
 			out.Total += line.Estimate
@@ -138,7 +156,8 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 
 // ListProductOptions returns priced Kroger products for an ingredient line.
 // searchOverride, when non-empty, replaces the derived SearchTerm for the Kroger query.
-func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, raw, searchOverride string) (*ProductOptionsResult, error) {
+func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, raw, searchOverride string, mode PricingMode) (*ProductOptionsResult, error) {
+	mode = NormalizePricingMode(string(mode))
 	raw = strings.TrimSpace(raw)
 	parsed := ParseLine(raw)
 	out := &ProductOptionsResult{
@@ -161,8 +180,6 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 	if err != nil {
 		return nil, err
 	}
-	// Keep relevance filter for ranking, but also surface other priced hits
-	// so the user can pick something the auto-matcher skipped.
 	relevant := filterRelevantProducts(parsed.Name, term, products)
 	seen := map[string]bool{}
 	ordered := make([]kroger.Product, 0, len(products))
@@ -200,7 +217,7 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 	}
 
 	for _, p := range ordered {
-		opt, ok := productOption(parsed, p, countBased, gramsNeeded)
+		opt, ok := productOption(parsed, p, countBased, gramsNeeded, mode)
 		if !ok {
 			continue
 		}
@@ -209,7 +226,7 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 	return out, nil
 }
 
-func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw string, override *LineOverride) LineEstimate {
+func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw string, override *LineOverride, mode PricingMode) LineEstimate {
 	parsed := ParseLine(raw)
 	le := LineEstimate{Input: raw}
 
@@ -248,7 +265,7 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 	}
 	if preferID != "" {
 		if p, ok := findProduct(products, preferID); ok {
-			return estimateWithProduct(parsed, p, le)
+			return estimateWithProduct(parsed, p, le, mode)
 		}
 	}
 
@@ -260,7 +277,7 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 	}
 
 	if IsCountBased(parsed.Unit) {
-		return estimateCount(parsed, products, le)
+		return estimateCount(parsed, products, le, mode)
 	}
 
 	gramsNeeded, ok, reason := NeedToGrams(parsed.Quantity, parsed.Unit, parsed.Name)
@@ -293,7 +310,7 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 			continue
 		}
 		pkgs := packagesNeeded(gramsNeeded, pkgG)
-		cost := pkgs * price
+		cost := lineCost(mode, gramsNeeded*ppg, pkgs*price)
 		if !found || cost < bestCost || (cost == bestCost && ppg < bestPricePerG) {
 			found = true
 			bestCost = cost
@@ -322,9 +339,9 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 	return le
 }
 
-func estimateWithProduct(parsed ParsedLine, p kroger.Product, le LineEstimate) LineEstimate {
+func estimateWithProduct(parsed ParsedLine, p kroger.Product, le LineEstimate, mode PricingMode) LineEstimate {
 	if IsCountBased(parsed.Unit) {
-		return estimateCount(parsed, []kroger.Product{p}, le)
+		return estimateCount(parsed, []kroger.Product{p}, le, mode)
 	}
 	gramsNeeded, ok, reason := NeedToGrams(parsed.Quantity, parsed.Unit, parsed.Name)
 	if !ok {
@@ -333,7 +350,7 @@ func estimateWithProduct(parsed ParsedLine, p kroger.Product, le LineEstimate) L
 		return le
 	}
 	le.Grams = round3(gramsNeeded)
-	opt, ok := productOption(parsed, p, false, gramsNeeded)
+	opt, ok := productOption(parsed, p, false, gramsNeeded, mode)
 	if !ok {
 		le.Status = StatusSkipped
 		le.Reason = "overridden product has no usable package size"
@@ -363,7 +380,7 @@ func overrideKey(input string) string {
 	return strings.ToLower(strings.TrimSpace(input))
 }
 
-func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate) LineEstimate {
+func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate, mode PricingMode) LineEstimate {
 	need := parsed.Quantity
 	if need <= 0 {
 		need = 1
@@ -392,11 +409,11 @@ func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate
 			pkgCount = count
 		}
 		pkgs := packagesNeeded(need, pkgCount)
-		cost := pkgs * price
 		per := DollarPerCount(price, pkgCount)
 		if per <= 0 || pkgs <= 0 {
 			continue
 		}
+		cost := lineCost(mode, need*per, pkgs*price)
 		if !found || cost < bestCost || (cost == bestCost && per < bestPer) {
 			found = true
 			bestCost = cost
@@ -425,7 +442,7 @@ func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate
 	return le
 }
 
-func productOption(parsed ParsedLine, p kroger.Product, countBased bool, gramsNeeded float64) (ProductOption, bool) {
+func productOption(parsed ParsedLine, p kroger.Product, countBased bool, gramsNeeded float64, mode PricingMode) (ProductOption, bool) {
 	price, size, ok := kroger.EffectivePrice(p)
 	if !ok {
 		return ProductOption{}, false
@@ -459,7 +476,7 @@ func productOption(parsed ParsedLine, p kroger.Product, countBased bool, gramsNe
 		opt.Mode = "count"
 		opt.UnitPricePerCount = round6(per)
 		opt.PackagesNeeded = pkgs
-		opt.Estimate = roundMoney(pkgs * price)
+		opt.Estimate = roundMoney(lineCost(mode, need*per, pkgs*price))
 		return opt, true
 	}
 
@@ -478,8 +495,15 @@ func productOption(parsed ParsedLine, p kroger.Product, countBased bool, gramsNe
 	opt.Mode = "weight"
 	opt.UnitPricePerGram = round6(ppg)
 	opt.PackagesNeeded = pkgs
-	opt.Estimate = roundMoney(pkgs * price)
+	opt.Estimate = roundMoney(lineCost(mode, gramsNeeded*ppg, pkgs*price))
 	return opt, true
+}
+
+func lineCost(mode PricingMode, portionCost, packageCost float64) float64 {
+	if mode == PricingPackages {
+		return packageCost
+	}
+	return portionCost
 }
 
 func productKey(p kroger.Product) string {
