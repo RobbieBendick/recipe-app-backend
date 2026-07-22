@@ -10,9 +10,10 @@ import (
 )
 
 type costBody struct {
-	Lines      []string `json:"lines"`
-	LocationID string   `json:"locationId"`
-	Zip        string   `json:"zip"`
+	Lines      []string               `json:"lines"`
+	LocationID string                 `json:"locationId"`
+	Zip        string                 `json:"zip"`
+	Overrides  []estimate.LineOverride `json:"overrides"`
 }
 
 type storeBody struct {
@@ -221,7 +222,7 @@ func (a *API) EstimateCost(w http.ResponseWriter, r *http.Request) {
 	}
 	locationID = kroger.NormalizeLocationID(locationID)
 
-	result, err := estimate.EstimateLines(r.Context(), a.Kroger, locationID, body.Lines)
+	result, err := estimate.EstimateLines(r.Context(), a.Kroger, locationID, body.Lines, body.Overrides)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to estimate cost: "+err.Error())
 		return

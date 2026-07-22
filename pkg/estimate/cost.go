@@ -62,6 +62,13 @@ type Result struct {
 	LocationID string         `json:"locationId"`
 }
 
+// LineOverride forces a specific Kroger product (and optional search term) for a line.
+type LineOverride struct {
+	Input      string `json:"input"`
+	ProductID  string `json:"productId"`
+	SearchTerm string `json:"searchTerm,omitempty"`
+}
+
 type StoreInfo struct {
 	LocationID string `json:"locationId"`
 	Name       string `json:"name"`
@@ -92,7 +99,16 @@ func NearestStore(ctx context.Context, client *kroger.Client, zip string) (*Stor
 	}, nil
 }
 
-func EstimateLines(ctx context.Context, client *kroger.Client, locationID string, lines []string) (*Result, error) {
+func EstimateLines(ctx context.Context, client *kroger.Client, locationID string, lines []string, overrides []LineOverride) (*Result, error) {
+	byInput := map[string]LineOverride{}
+	for _, o := range overrides {
+		key := overrideKey(o.Input)
+		if key == "" || strings.TrimSpace(o.ProductID) == "" {
+			continue
+		}
+		byInput[key] = o
+	}
+
 	out := &Result{
 		Currency:   "USD",
 		LocationID: locationID,
@@ -104,7 +120,12 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 		if raw == "" {
 			continue
 		}
-		line := estimateOne(ctx, client, locationID, raw)
+		var ov *LineOverride
+		if o, ok := byInput[overrideKey(raw)]; ok {
+			cp := o
+			ov = &cp
+		}
+		line := estimateOne(ctx, client, locationID, raw, ov)
 		out.Lines = append(out.Lines, line)
 		if line.Status == StatusOK {
 			out.Total += line.Estimate
@@ -188,7 +209,7 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 	return out, nil
 }
 
-func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw string) LineEstimate {
+func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw string, override *LineOverride) LineEstimate {
 	parsed := ParseLine(raw)
 	le := LineEstimate{Input: raw}
 
@@ -199,6 +220,9 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 	}
 
 	term := SearchTerm(parsed.Name)
+	if override != nil && strings.TrimSpace(override.SearchTerm) != "" {
+		term = strings.TrimSpace(override.SearchTerm)
+	}
 	le.SearchTerm = term
 	if term == "" {
 		le.Status = StatusSkipped
@@ -211,12 +235,23 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 		return le
 	}
 
-	products, err := client.SearchProducts(ctx, term, locationID, 12)
+	products, err := client.SearchProducts(ctx, term, locationID, 24)
 	if err != nil {
 		le.Status = StatusError
 		le.Reason = err.Error()
 		return le
 	}
+
+	preferID := ""
+	if override != nil {
+		preferID = strings.TrimSpace(override.ProductID)
+	}
+	if preferID != "" {
+		if p, ok := findProduct(products, preferID); ok {
+			return estimateWithProduct(parsed, p, le)
+		}
+	}
+
 	products = filterRelevantProducts(parsed.Name, term, products)
 	if len(products) == 0 {
 		le.Status = StatusSkipped
@@ -285,6 +320,47 @@ func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw str
 	le.ProductSize = bestSize
 	le.ProductPrice = bestPrice
 	return le
+}
+
+func estimateWithProduct(parsed ParsedLine, p kroger.Product, le LineEstimate) LineEstimate {
+	if IsCountBased(parsed.Unit) {
+		return estimateCount(parsed, []kroger.Product{p}, le)
+	}
+	gramsNeeded, ok, reason := NeedToGrams(parsed.Quantity, parsed.Unit, parsed.Name)
+	if !ok {
+		le.Status = StatusSkipped
+		le.Reason = reason
+		return le
+	}
+	le.Grams = round3(gramsNeeded)
+	opt, ok := productOption(parsed, p, false, gramsNeeded)
+	if !ok {
+		le.Status = StatusSkipped
+		le.Reason = "overridden product has no usable package size"
+		return le
+	}
+	le.Status = StatusOK
+	le.UnitPricePerGram = opt.UnitPricePerGram
+	le.PackagesNeeded = opt.PackagesNeeded
+	le.Estimate = opt.Estimate
+	le.ProductID = opt.ProductID
+	le.ProductDescription = opt.Description
+	le.ProductSize = opt.Size
+	le.ProductPrice = opt.Price
+	return le
+}
+
+func findProduct(products []kroger.Product, productID string) (kroger.Product, bool) {
+	for _, p := range products {
+		if p.ProductID == productID {
+			return p, true
+		}
+	}
+	return kroger.Product{}, false
+}
+
+func overrideKey(input string) string {
+	return strings.ToLower(strings.TrimSpace(input))
 }
 
 func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate) LineEstimate {
