@@ -21,15 +21,16 @@ type PublicUser struct {
 	Email     string `json:"email"`
 	Name      string `json:"name"`
 	AvatarURL string `json:"avatarUrl"`
+	Nickname  string `json:"nickname,omitempty"`
 }
 
 type Friendship struct {
-	ID          string     `json:"id"`
-	RequesterID string     `json:"requesterId"`
-	AddresseeID string     `json:"addresseeId"`
-	Status      string     `json:"status"`
-	CreatedAt   time.Time  `json:"createdAt"`
-	UpdatedAt   time.Time  `json:"updatedAt"`
+	ID          string      `json:"id"`
+	RequesterID string      `json:"requesterId"`
+	AddresseeID string      `json:"addresseeId"`
+	Status      string      `json:"status"`
+	CreatedAt   time.Time   `json:"createdAt"`
+	UpdatedAt   time.Time   `json:"updatedAt"`
 	OtherUser   *PublicUser `json:"otherUser,omitempty"`
 }
 
@@ -50,6 +51,70 @@ func PublicUserFromUser(u *User) *PublicUser {
 		Name:      u.Name,
 		AvatarURL: u.AvatarURL,
 	}
+}
+
+func FriendDisplayName(u *PublicUser) string {
+	if u == nil {
+		return "Friend"
+	}
+	if nick := strings.TrimSpace(u.Nickname); nick != "" {
+		return nick
+	}
+	if name := strings.TrimSpace(u.Name); name != "" {
+		return name
+	}
+	return u.Email
+}
+
+func GetFriendNickname(ctx context.Context, pool *pgxpool.Pool, userID, friendUserID string) (string, error) {
+	var nick string
+	err := pool.QueryRow(ctx, `
+		SELECT nickname FROM friend_nicknames
+		WHERE user_id = $1 AND friend_user_id = $2
+	`, userID, friendUserID).Scan(&nick)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", nil
+	}
+	return nick, err
+}
+
+func SetFriendNickname(ctx context.Context, pool *pgxpool.Pool, userID, friendUserID, nickname string) (*PublicUser, error) {
+	ok, err := AreFriends(ctx, pool, userID, friendUserID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, ErrFriendshipNotFound
+	}
+
+	nickname = strings.TrimSpace(nickname)
+	if nickname == "" {
+		_, err := pool.Exec(ctx, `
+			DELETE FROM friend_nicknames
+			WHERE user_id = $1 AND friend_user_id = $2
+		`, userID, friendUserID)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		_, err := pool.Exec(ctx, `
+			INSERT INTO friend_nicknames (user_id, friend_user_id, nickname, updated_at)
+			VALUES ($1, $2, $3, now())
+			ON CONFLICT (user_id, friend_user_id)
+			DO UPDATE SET nickname = EXCLUDED.nickname, updated_at = now()
+		`, userID, friendUserID, nickname)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	friend, err := GetUserByID(ctx, pool, friendUserID)
+	if err != nil || friend == nil {
+		return nil, err
+	}
+	out := PublicUserFromUser(friend)
+	out.Nickname = nickname
+	return out, nil
 }
 
 func GetFriendshipBetween(ctx context.Context, pool *pgxpool.Pool, userA, userB string) (*Friendship, error) {
@@ -157,6 +222,11 @@ func RemoveFriendship(ctx context.Context, pool *pgxpool.Pool, userID, friendUse
 	if err := DeleteSharedShoppingListForPair(ctx, pool, userID, friendUserID); err != nil {
 		return err
 	}
+	_, _ = pool.Exec(ctx, `
+		DELETE FROM friend_nicknames
+		WHERE (user_id = $1 AND friend_user_id = $2)
+		   OR (user_id = $2 AND friend_user_id = $1)
+	`, userID, friendUserID)
 	tag, err := pool.Exec(ctx, `
 		DELETE FROM friendships
 		WHERE status = $3
@@ -176,15 +246,19 @@ func RemoveFriendship(ctx context.Context, pool *pgxpool.Pool, userID, friendUse
 
 func ListFriends(ctx context.Context, pool *pgxpool.Pool, userID string) ([]PublicUser, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT u.id, u.email, u.name, u.avatar_url
+		SELECT u.id, u.email, u.name, u.avatar_url, COALESCE(n.nickname, '')
 		FROM friendships f
 		JOIN users u ON u.id = CASE
 			WHEN f.requester_id = $1 THEN f.addressee_id
 			ELSE f.requester_id
 		END
+		LEFT JOIN friend_nicknames n
+			ON n.user_id = $1 AND n.friend_user_id = u.id
 		WHERE f.status = $2
 		  AND (f.requester_id = $1 OR f.addressee_id = $1)
-		ORDER BY lower(COALESCE(NULLIF(u.name, ''), u.email)) ASC
+		ORDER BY lower(
+			COALESCE(NULLIF(n.nickname, ''), NULLIF(u.name, ''), u.email)
+		) ASC
 	`, userID, FriendshipAccepted)
 	if err != nil {
 		return nil, err
@@ -194,7 +268,7 @@ func ListFriends(ctx context.Context, pool *pgxpool.Pool, userID string) ([]Publ
 	out := make([]PublicUser, 0)
 	for rows.Next() {
 		var u PublicUser
-		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.AvatarURL); err != nil {
+		if err := rows.Scan(&u.ID, &u.Email, &u.Name, &u.AvatarURL, &u.Nickname); err != nil {
 			return nil, err
 		}
 		out = append(out, u)

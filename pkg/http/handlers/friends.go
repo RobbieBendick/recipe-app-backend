@@ -222,6 +222,39 @@ func (a *API) GetOrCreateSharedShoppingList(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, status, list)
 }
 
+type setNicknameBody struct {
+	Nickname string `json:"nickname"`
+}
+
+func (a *API) SetFriendNickname(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	friendID := chi.URLParam(r, "userId")
+	var body setNicknameBody
+	if err := decodeJSON(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	friend, err := db.SetFriendNickname(r.Context(), a.DB, userID, friendID, body.Nickname)
+	if err != nil {
+		if errors.Is(err, db.ErrFriendshipNotFound) {
+			writeError(w, http.StatusNotFound, "friend not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to save nickname")
+		return
+	}
+	if friend == nil {
+		writeError(w, http.StatusNotFound, "friend not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, friend)
+}
+
 func displayName(u *db.User) string {
 	if u == nil {
 		return "Someone"

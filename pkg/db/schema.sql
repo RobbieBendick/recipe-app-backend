@@ -222,3 +222,12 @@ CREATE TABLE IF NOT EXISTS shopping_list_shares (
 CREATE INDEX IF NOT EXISTS shopping_list_shares_user_a_idx ON shopping_list_shares (user_a);
 CREATE INDEX IF NOT EXISTS shopping_list_shares_user_b_idx ON shopping_list_shares (user_b);
 
+CREATE TABLE IF NOT EXISTS friend_nicknames (
+	user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	friend_user_id UUID NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+	nickname TEXT NOT NULL DEFAULT '',
+	updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY (user_id, friend_user_id),
+	CONSTRAINT friend_nicknames_no_self CHECK (user_id <> friend_user_id)
+);
+

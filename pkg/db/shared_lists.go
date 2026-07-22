@@ -15,14 +15,15 @@ func attachSharedWith(ctx context.Context, pool *pgxpool.Pool, viewerID string, 
 	}
 	row := pool.QueryRow(ctx, `
 		SELECT
-			CASE WHEN s.user_a = $2 THEN s.user_b ELSE s.user_a END,
-			u.email, u.name, u.avatar_url
+			u.id, u.email, u.name, u.avatar_url, COALESCE(n.nickname, '')
 		FROM shopping_list_shares s
 		JOIN users u ON u.id = CASE WHEN s.user_a = $2 THEN s.user_b ELSE s.user_a END
+		LEFT JOIN friend_nicknames n
+			ON n.user_id = $2 AND n.friend_user_id = u.id
 		WHERE s.list_id = $1
 	`, list.ID, viewerID)
 	var other PublicUser
-	err := row.Scan(&other.ID, &other.Email, &other.Name, &other.AvatarURL)
+	err := row.Scan(&other.ID, &other.Email, &other.Name, &other.AvatarURL, &other.Nickname)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil
 	}
@@ -69,11 +70,11 @@ func GetOrCreateSharedShoppingList(ctx context.Context, pool *pgxpool.Pool, user
 		return nil, false, err
 	}
 
-	friendLabel := friend.Name
-	if friendLabel == "" {
-		friendLabel = friend.Email
+	friendPublic := PublicUserFromUser(friend)
+	if nick, err := GetFriendNickname(ctx, pool, userID, friendUserID); err == nil {
+		friendPublic.Nickname = nick
 	}
-	title := fmt.Sprintf("Shopping with %s", friendLabel)
+	title := fmt.Sprintf("Shopping with %s", FriendDisplayName(friendPublic))
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {

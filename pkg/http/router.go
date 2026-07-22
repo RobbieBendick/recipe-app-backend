@@ -121,6 +121,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Post("/requests/{id}/accept", api.AcceptFriendRequest)
 				r.Post("/requests/{id}/decline", api.DeclineFriendRequest)
 				r.Get("/{userId}/shared-list", api.GetOrCreateSharedShoppingList)
+				r.Put("/{userId}/nickname", api.SetFriendNickname)
 				r.Delete("/{userId}", api.RemoveFriend)
 			})
 
