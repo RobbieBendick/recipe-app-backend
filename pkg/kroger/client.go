@@ -13,15 +13,16 @@ import (
 )
 
 const (
-	baseURL   = "https://api.kroger.com/v1"
-	tokenURL  = "https://api.kroger.com/v1/connect/oauth2/token"
-	tokenScope = "product.compact"
-	cacheTTL  = 15 * time.Minute
+	DefaultBaseURL = "https://api.kroger.com/v1"
+	CertBaseURL    = "https://api-ce.kroger.com/v1"
+	tokenScope     = "product.compact"
+	cacheTTL       = 15 * time.Minute
 )
 
 type Client struct {
 	clientID     string
 	clientSecret string
+	baseURL      string
 	http         *http.Client
 
 	mu          sync.Mutex
@@ -70,10 +71,16 @@ type Product struct {
 	} `json:"items"`
 }
 
-func NewClient(clientID, clientSecret string) *Client {
+func NewClient(clientID, clientSecret, apiBaseURL string) *Client {
+	base := strings.TrimRight(strings.TrimSpace(apiBaseURL), "/")
+	if base == "" {
+		// Certification apps (portal label "… - Certification") use api-ce.
+		base = CertBaseURL
+	}
 	return &Client{
 		clientID:     cleanCredential(clientID),
 		clientSecret: cleanCredential(clientSecret),
+		baseURL:      base,
 		http:         &http.Client{Timeout: 20 * time.Second},
 		cache:        make(map[string]cacheEntry),
 	}
@@ -136,7 +143,7 @@ func (c *Client) requestToken(ctx context.Context, scope string, useBasic bool) 
 		form.Set("client_secret", c.clientSecret)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenURL, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/connect/oauth2/token", strings.NewReader(form.Encode()))
 	if err != nil {
 		return "", err
 	}
@@ -184,11 +191,12 @@ func (c *Client) requestToken(ctx context.Context, scope string, useBasic bool) 
 // Status is a safe diagnostic snapshot (never includes the secret).
 func (c *Client) Status(ctx context.Context) map[string]any {
 	out := map[string]any{
-		"configured":      c.Configured(),
-		"clientIdLength":  len(c.clientID),
-		"clientIdPrefix":  prefix(c.clientID, 4),
+		"configured":       c.Configured(),
+		"apiBaseUrl":       c.baseURL,
+		"clientIdLength":   len(c.clientID),
+		"clientIdPrefix":   prefix(c.clientID, 4),
 		"secretConfigured": len(c.clientSecret) > 0,
-		"secretLength":    len(c.clientSecret),
+		"secretLength":     len(c.clientSecret),
 	}
 	if !c.Configured() {
 		out["tokenOk"] = false
@@ -262,7 +270,7 @@ func (c *Client) SearchLocations(ctx context.Context, zip string, limit int) ([]
 	var payload struct {
 		Data []Location `json:"data"`
 	}
-	if err := c.getJSON(ctx, baseURL+"/locations", q, &payload); err != nil {
+	if err := c.getJSON(ctx, c.baseURL+"/locations", q, &payload); err != nil {
 		return nil, err
 	}
 	for i := range payload.Data {
@@ -304,7 +312,7 @@ func (c *Client) SearchProducts(ctx context.Context, term, locationID string, li
 	var payload struct {
 		Data []Product `json:"data"`
 	}
-	if err := c.getJSON(ctx, baseURL+"/products", q, &payload); err != nil {
+	if err := c.getJSON(ctx, c.baseURL+"/products", q, &payload); err != nil {
 		return nil, err
 	}
 

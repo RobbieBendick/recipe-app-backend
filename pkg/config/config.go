@@ -15,6 +15,7 @@ type Config struct {
 	GoogleClientID       string
 	KrogerClientID       string
 	KrogerClientSecret   string
+	KrogerAPIBaseURL     string
 	KrogerDefaultZip     string
 	HTTPWriteTimeoutSec  int
 	DatabasePoolMaxConns int
@@ -30,6 +31,7 @@ func Load() Config {
 		GoogleClientID:       getEnv("GOOGLE_CLIENT_ID", ""),
 		KrogerClientID:       getEnv("KROGER_CLIENT_ID", ""),
 		KrogerClientSecret:   getEnv("KROGER_CLIENT_SECRET", ""),
+		KrogerAPIBaseURL:     getEnv("KROGER_API_BASE_URL", "https://api-ce.kroger.com/v1"),
 		KrogerDefaultZip:     getEnv("KROGER_DEFAULT_ZIP", ""),
 		HTTPWriteTimeoutSec:  getEnvInt("HTTP_WRITE_TIMEOUT_SEC", 120),
 		DatabasePoolMaxConns: getEnvInt("DATABASE_POOL_MAX_CONNS", 5),

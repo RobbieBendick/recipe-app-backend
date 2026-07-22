@@ -23,7 +23,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		authService, _ = auth.NewService(fallbackJWTSecret(cfg), cfg.GoogleClientID)
 	}
 
-	krogerClient := kroger.NewClient(cfg.KrogerClientID, cfg.KrogerClientSecret)
+	krogerClient := kroger.NewClient(cfg.KrogerClientID, cfg.KrogerClientSecret, cfg.KrogerAPIBaseURL)
 	if !krogerClient.Configured() {
 		log.Printf("kroger credentials missing: price estimates disabled until KROGER_CLIENT_ID/SECRET are set")
 	}
