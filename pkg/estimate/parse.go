@@ -35,9 +35,13 @@ var (
 		"ct": "count", "count": "count", "each": "count",
 	}
 	unitPattern = buildUnitPattern()
-	withUnitRE  = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s*(` + unitPattern + `)\b\.?(?:\s+of)?\s+(.+)$`)
-	qtyOnlyRE   = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s+(.+)$`)
-	emojiRE     = regexp.MustCompile(`^[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]+\s*`)
+	// "32oz sugar", "2 cups flour", "3 1/2 cups sugar"
+	withUnitRE = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s*(` + unitPattern + `)\b\.?(?:\s+of)?\s+(.+)$`)
+	// "2 32oz chocolate chips" → 2 × 32 oz (size qty is not a mixed number)
+	sizeQtyPattern = `(?:\d+/\d+|\d+\.\d+|\d+)`
+	countTimesSizeRE = regexp.MustCompile(`(?i)^(\d+(?:\.\d+)?)\s+(` + sizeQtyPattern + `)\s*(` + unitPattern + `)\b\.?(?:\s+of)?\s+(.+)$`)
+	qtyOnlyRE = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s+(.+)$`)
+	emojiRE   = regexp.MustCompile(`^[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]+\s*`)
 )
 
 func buildUnitPattern() string {
@@ -116,11 +120,26 @@ func ParseLine(line string) ParsedLine {
 		return ParsedLine{Quantity: 1, Raw: line}
 	}
 
+	// Prefer mixed measures like "3 1/2 cups" over "count × size".
 	if m := withUnitRE.FindStringSubmatch(cleaned); m != nil {
 		label := strings.Join(strings.Fields(m[3]), " ")
 		return ParsedLine{
 			Quantity: parseQuantity(m[1]),
 			Unit:     normalizeUnit(m[2]),
+			Name:     normalizeName(label),
+			Label:    label,
+			Raw:      line,
+		}
+	}
+
+	// "2 32oz chocolate chips" / "2 16 oz chocolate chips" → 64 oz / 32 oz
+	if m := countTimesSizeRE.FindStringSubmatch(cleaned); m != nil {
+		label := strings.Join(strings.Fields(m[4]), " ")
+		count := parseQuantity(m[1])
+		size := parseQuantity(m[2])
+		return ParsedLine{
+			Quantity: count * size,
+			Unit:     normalizeUnit(m[3]),
 			Name:     normalizeName(label),
 			Label:    label,
 			Raw:      line,
