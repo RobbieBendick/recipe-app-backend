@@ -68,6 +68,15 @@ func GetSharedPantry(ctx context.Context, pool *pgxpool.Pool, userID, pantryID s
 	if err != nil {
 		return nil, err
 	}
+	if len(items) == 0 {
+		if err := seedDefaultSharedPantry(ctx, pool, userID, pantryID); err != nil {
+			return nil, err
+		}
+		items, err = querySharedPantryItems(ctx, pool, pantryID)
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	return &SharedPantry{
 		ID:         pantryID,

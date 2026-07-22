@@ -157,12 +157,20 @@ func queryPantry(ctx context.Context, pool *pgxpool.Pool, userID string) ([]Pant
 }
 
 func seedDefaultPantry(ctx context.Context, pool *pgxpool.Pool, userID string) error {
+	return seedDefaultPantryItems(ctx, pool, userID, nil)
+}
+
+func seedDefaultSharedPantry(ctx context.Context, pool *pgxpool.Pool, userID, sharedPantryID string) error {
+	return seedDefaultPantryItems(ctx, pool, userID, &sharedPantryID)
+}
+
+func seedDefaultPantryItems(ctx context.Context, pool *pgxpool.Pool, userID string, sharedPantryID *string) error {
 	for i, item := range defaultPantry {
 		inStock := item.Amount > 0
 		_, err := pool.Exec(ctx, `
 			INSERT INTO pantry_items (user_id, name, emoji, notes, in_stock, percent, unit, sort_order, shared_pantry_id)
-			VALUES ($1, $2, $3, '', $4, $5, $6, $7, NULL)
-		`, userID, item.Name, item.Emoji, inStock, item.Amount, item.Unit, i)
+			VALUES ($1, $2, $3, '', $4, $5, $6, $7, $8)
+		`, userID, item.Name, item.Emoji, inStock, item.Amount, item.Unit, i, sharedPantryID)
 		if err != nil {
 			return err
 		}
