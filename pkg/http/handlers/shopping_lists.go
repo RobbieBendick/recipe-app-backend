@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -97,6 +98,38 @@ func (a *API) UpdateShoppingList(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list)
 }
 
+type patchListBody struct {
+	Title string `json:"title"`
+}
+
+func (a *API) PatchShoppingList(w http.ResponseWriter, r *http.Request) {
+	userID, ok := a.requireUser(w, r)
+	if !ok {
+		return
+	}
+	id := chi.URLParam(r, "id")
+	var in patchListBody
+	if err := decodeJSON(r, &in); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+
+	list, err := db.UpdateShoppingListTitle(r.Context(), a.DB, userID, id, in.Title)
+	if err != nil {
+		if errors.Is(err, db.ErrInvalidShoppingListTitle) {
+			writeError(w, http.StatusBadRequest, "title is required")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to update shopping list")
+		return
+	}
+	if list == nil {
+		writeError(w, http.StatusNotFound, "shopping list not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
 func (a *API) DeleteShoppingList(w http.ResponseWriter, r *http.Request) {
 	userID, ok := a.requireUser(w, r)
 	if !ok {
@@ -105,6 +138,10 @@ func (a *API) DeleteShoppingList(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	okDel, err := db.DeleteShoppingList(r.Context(), a.DB, userID, id)
 	if err != nil {
+		if errors.Is(err, db.ErrCannotDeleteSharedList) {
+			writeError(w, http.StatusForbidden, "shared shopping lists can't be deleted")
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to delete shopping list")
 		return
 	}

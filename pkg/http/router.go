@@ -85,6 +85,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", api.GetShoppingList)
 					r.Put("/", api.UpdateShoppingList)
+					r.Patch("/", api.PatchShoppingList)
 					r.Delete("/", api.DeleteShoppingList)
 					r.Post("/items", api.AddShoppingListItem)
 					r.Post("/recipes", api.AddRecipeToList)

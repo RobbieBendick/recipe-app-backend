@@ -284,6 +284,34 @@ func CreateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID string, 
 	return GetShoppingList(ctx, pool, userID, list.ID)
 }
 
+func UpdateShoppingListTitle(ctx context.Context, pool *pgxpool.Pool, userID, id, title string) (*ShoppingList, error) {
+	ok, err := canAccessShoppingList(ctx, pool, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, ErrInvalidShoppingListTitle
+	}
+
+	tag, err := pool.Exec(ctx, `
+		UPDATE shopping_lists
+		SET title = $2, updated_at = now()
+		WHERE id = $1
+	`, id, title)
+	if err != nil {
+		return nil, err
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, nil
+	}
+	return GetShoppingList(ctx, pool, userID, id)
+}
+
 func UpdateShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string, in ShoppingListInput) (*ShoppingList, error) {
 	ok, err := canAccessShoppingList(ctx, pool, userID, id)
 	if err != nil {
@@ -345,7 +373,18 @@ func DeleteShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id stri
 	if !ok {
 		return false, nil
 	}
-	tag, err := pool.Exec(ctx, `DELETE FROM shopping_lists WHERE id = $1`, id)
+
+	var shared bool
+	if err := pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM shopping_list_shares WHERE list_id = $1)
+	`, id).Scan(&shared); err != nil {
+		return false, err
+	}
+	if shared {
+		return false, ErrCannotDeleteSharedList
+	}
+
+	tag, err := pool.Exec(ctx, `DELETE FROM shopping_lists WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return false, err
 	}
