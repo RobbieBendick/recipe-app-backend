@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net"
 	"net/http"
@@ -459,6 +460,7 @@ func nonEmptyLines(text string) []string {
 }
 
 func cleanText(s string) string {
+	s = html.UnescapeString(s)
 	s = strings.ReplaceAll(s, "\u00a0", " ")
 	s = htmlTagRe.ReplaceAllString(s, " ")
 	s = strings.Join(strings.Fields(s), " ")

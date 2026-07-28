@@ -94,3 +94,11 @@ func TestValidateURLRejectsLocal(t *testing.T) {
 		t.Fatalf("expected invalid URL, got %v", err)
 	}
 }
+
+func TestCleanTextUnescapesEntities(t *testing.T) {
+	in := "It shouldn&#8217;t be hot &#8211; but &#8220;wet&#8221; dough."
+	want := "It shouldn\u2019t be hot \u2013 but \u201cwet\u201d dough."
+	if got := cleanText(in); got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

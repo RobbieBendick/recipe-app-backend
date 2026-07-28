@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"regexp"
@@ -203,18 +204,15 @@ func buildGeminiPrompt(pageURL, pageText string) string {
 	return b.String()
 }
 
-func htmlToPlainText(html string) string {
-	text := stripScriptRe.ReplaceAllString(html, " ")
+func htmlToPlainText(rawHTML string) string {
+	text := stripScriptRe.ReplaceAllString(rawHTML, " ")
 	text = stripStyleRe.ReplaceAllString(text, " ")
 	text = stripNoscriptRe.ReplaceAllString(text, " ")
 	text = stripSVGRe.ReplaceAllString(text, " ")
 	text = stripIFrameRe.ReplaceAllString(text, " ")
 	text = stripTagsRe.ReplaceAllString(text, " ")
-	text = strings.ReplaceAll(text, "&nbsp;", " ")
-	text = strings.ReplaceAll(text, "&amp;", "&")
-	text = strings.ReplaceAll(text, "&lt;", "<")
-	text = strings.ReplaceAll(text, "&gt;", ">")
-	text = strings.ReplaceAll(text, "&quot;", `"`)
+	text = html.UnescapeString(text)
+	text = strings.ReplaceAll(text, "\u00a0", " ")
 	text = multiSpaceRe.ReplaceAllString(text, " ")
 	text = strings.TrimSpace(text)
 	return truncateRunes(text, maxPageTextRunes)
