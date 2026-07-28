@@ -224,7 +224,15 @@ func (a *API) EstimateCost(w http.ResponseWriter, r *http.Request) {
 	}
 	locationID = kroger.NormalizeLocationID(locationID)
 
-	result, err := estimate.EstimateLines(r.Context(), a.Kroger, locationID, body.Lines, body.Overrides, estimate.NormalizePricingMode(body.Pricing))
+	result, err := estimate.EstimateLines(
+		r.Context(),
+		a.Kroger,
+		locationID,
+		body.Lines,
+		body.Overrides,
+		estimate.NormalizePricingMode(body.Pricing),
+		estimate.NewAssist(a.GeminiAPIKey, a.GeminiModel),
+	)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to estimate cost: "+err.Error())
 		return
@@ -285,7 +293,15 @@ func (a *API) EstimateProducts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := estimate.ListProductOptions(r.Context(), a.Kroger, locationID, line, body.SearchTerm, estimate.NormalizePricingMode(body.Pricing))
+	result, err := estimate.ListProductOptions(
+		r.Context(),
+		a.Kroger,
+		locationID,
+		line,
+		body.SearchTerm,
+		estimate.NormalizePricingMode(body.Pricing),
+		estimate.NewAssist(a.GeminiAPIKey, a.GeminiModel),
+	)
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "failed to search products: "+err.Error())
 		return

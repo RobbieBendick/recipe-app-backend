@@ -33,9 +33,9 @@ func (a *API) ImportRecipeFromURL(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, recipeimport.ErrBlockedHost):
 			writeError(w, http.StatusBadRequest, "that URL is not allowed")
 		case errors.Is(err, recipeimport.ErrNoRecipeData):
-			writeError(w, http.StatusUnprocessableEntity, "couldn't find recipe details on that page — try another link or fill the form manually")
+			writeError(w, http.StatusUnprocessableEntity, "couldn't find recipe details — for Instagram/Facebook, make sure the post is public and the caption lists the recipe")
 		case errors.Is(err, recipeimport.ErrFetchFailed):
-			writeError(w, http.StatusBadGateway, "couldn't load that page — check the link and try again")
+			writeError(w, http.StatusBadGateway, "couldn't load that page — for Reels, the post may be private or blocked")
 		case errors.Is(err, recipeimport.ErrAIFailed):
 			writeError(w, http.StatusBadGateway, "AI couldn't extract that recipe — try another link or fill the form manually")
 		default:

@@ -1,6 +1,9 @@
 package recipeimport
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestFindRecipeJSONLD(t *testing.T) {
 	html := `
@@ -100,5 +103,35 @@ func TestCleanTextUnescapesEntities(t *testing.T) {
 	want := "It shouldn\u2019t be hot \u2013 but \u201cwet\u201d dough."
 	if got := cleanText(in); got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestIsSocialMediaURL(t *testing.T) {
+	cases := map[string]bool{
+		"https://www.instagram.com/reel/AbC123/": true,
+		"https://instagram.com/p/AbC123/":        true,
+		"https://www.facebook.com/reel/123456":   true,
+		"https://fb.watch/abc123/":               true,
+		"https://www.allrecipes.com/recipe/1":    false,
+	}
+	for raw, want := range cases {
+		u, err := validateURL(raw)
+		if err != nil {
+			t.Fatalf("%s: validate: %v", raw, err)
+		}
+		if got := isSocialMediaURL(u); got != want {
+			t.Fatalf("%s: got %v want %v", raw, got, want)
+		}
+	}
+}
+
+func TestCleanSocialCaption(t *testing.T) {
+	og := `1,379 likes, 27 comments - chef on April 25, 2025: "Mix flour and eggs. Bake 20 minutes.".`
+	got := cleanSocialCaption(og, "instagram")
+	if !strings.Contains(got, "Mix flour and eggs") {
+		t.Fatalf("caption=%q", got)
+	}
+	if strings.Contains(strings.ToLower(got), "likes") {
+		t.Fatalf("should strip engagement prefix: %q", got)
 	}
 }

@@ -72,6 +72,14 @@ type geminiRecipeJSON struct {
 }
 
 func extractWithGemini(ctx context.Context, apiKey, model, pageURL, html string) (*Extracted, error) {
+	pageText := htmlToPlainText(html)
+	if pageText == "" {
+		return nil, fmt.Errorf("page had no readable text")
+	}
+	return extractWithGeminiText(ctx, apiKey, model, pageURL, pageText, false)
+}
+
+func extractWithGeminiText(ctx context.Context, apiKey, model, pageURL, pageText string, socialCaption bool) (*Extracted, error) {
 	apiKey = strings.TrimSpace(apiKey)
 	if apiKey == "" {
 		return nil, fmt.Errorf("missing gemini api key")
@@ -80,13 +88,16 @@ func extractWithGemini(ctx context.Context, apiKey, model, pageURL, html string)
 	if model == "" {
 		model = "gemini-2.0-flash"
 	}
-
-	pageText := htmlToPlainText(html)
+	pageText = strings.TrimSpace(pageText)
 	if pageText == "" {
 		return nil, fmt.Errorf("page had no readable text")
 	}
+	pageText = truncateRunes(pageText, maxPageTextRunes)
 
 	prompt := buildGeminiPrompt(pageURL, pageText)
+	if socialCaption {
+		prompt = buildSocialGeminiPrompt(pageURL, pageText)
+	}
 	endpoint := fmt.Sprintf(
 		"https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s",
 		model,
@@ -201,6 +212,24 @@ func buildGeminiPrompt(pageURL, pageText string) string {
 	b.WriteString(pageURL)
 	b.WriteString("\n\nPage text:\n")
 	b.WriteString(pageText)
+	return b.String()
+}
+
+func buildSocialGeminiPrompt(pageURL, captionText string) string {
+	var b strings.Builder
+	b.WriteString("Extract a cooking recipe from this Instagram/Facebook Reel or post caption/description.\n")
+	b.WriteString("Focus on the CAPTION text. Recipe creators often list ingredients and steps in the description.\n")
+	b.WriteString("Return only facts clearly present. Do not invent ingredients or steps that are not written.\n")
+	b.WriteString("Ignore hashtags, @mentions, emojis-as-filler, and promotional links unless they are part of an ingredient name.\n")
+	b.WriteString("If ingredients/steps are written as one block, split them into separate array items.\n")
+	b.WriteString("If a field is unknown, use an empty string, empty array, or 0.\n")
+	b.WriteString("ingredients: one ingredient per array item, including amounts when shown.\n")
+	b.WriteString("steps: one cooking instruction per array item, in order.\n")
+	b.WriteString("prepMinutes/cookMinutes/servings: integers only; 0 if unknown.\n\n")
+	b.WriteString("Post URL: ")
+	b.WriteString(pageURL)
+	b.WriteString("\n\nCaption / description:\n")
+	b.WriteString(captionText)
 	return b.String()
 }
 

@@ -63,13 +63,18 @@ var (
 
 // FromURL fetches the page and extracts whatever recipe fields it can.
 // When a Gemini API key is provided, AI extraction is preferred and JSON-LD fills gaps.
+// Instagram / Facebook Reel links use caption/description text instead of full page HTML.
 func FromURL(ctx context.Context, rawURL string, opts Options) (*Extracted, error) {
 	parsed, err := validateURL(rawURL)
 	if err != nil {
 		return nil, err
 	}
 
-	html, err := fetchHTML(ctx, parsed.String())
+	if isSocialMediaURL(parsed) {
+		return fromSocialURL(ctx, parsed, opts)
+	}
+
+	rawHTML, err := fetchHTML(ctx, parsed.String())
 	if err != nil {
 		return nil, err
 	}
@@ -79,24 +84,24 @@ func FromURL(ctx context.Context, rawURL string, opts Options) (*Extracted, erro
 		Steps:       []string{},
 		SourceURL:   parsed.String(),
 	}
-	if recipe := findRecipeJSONLD(html); recipe != nil {
+	if recipe := findRecipeJSONLD(rawHTML); recipe != nil {
 		applyJSONLD(structured, recipe)
 	}
 	if structured.Title == "" {
-		structured.Title = firstMeta(html, ogTitleRe, ogTitleRe2)
+		structured.Title = firstMeta(rawHTML, ogTitleRe, ogTitleRe2)
 	}
 	if structured.Title == "" {
-		if m := htmlTitleRe.FindStringSubmatch(html); len(m) == 2 {
+		if m := htmlTitleRe.FindStringSubmatch(rawHTML); len(m) == 2 {
 			structured.Title = cleanText(m[1])
 		}
 	}
 	if structured.Description == "" {
-		structured.Description = firstMeta(html, ogDescRe, ogDescRe2)
+		structured.Description = firstMeta(rawHTML, ogDescRe, ogDescRe2)
 	}
 
 	var out *Extracted
 	if strings.TrimSpace(opts.GeminiAPIKey) != "" {
-		aiOut, aiErr := extractWithGemini(ctx, opts.GeminiAPIKey, opts.GeminiModel, parsed.String(), html)
+		aiOut, aiErr := extractWithGemini(ctx, opts.GeminiAPIKey, opts.GeminiModel, parsed.String(), rawHTML)
 		if aiErr == nil && hasUsefulRecipe(aiOut) {
 			out = aiOut
 			fillGaps(out, structured)
@@ -198,6 +203,10 @@ func isPrivateIP(ip net.IP) bool {
 }
 
 func fetchHTML(ctx context.Context, pageURL string) (string, error) {
+	return fetchHTMLWithUA(ctx, pageURL, defaultUserAgent)
+}
+
+func fetchHTMLWithUA(ctx context.Context, pageURL, userAgent string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
@@ -205,8 +214,12 @@ func fetchHTML(ctx context.Context, pageURL string) (string, error) {
 	if err != nil {
 		return "", ErrFetchFailed
 	}
-	req.Header.Set("User-Agent", defaultUserAgent)
+	if strings.TrimSpace(userAgent) == "" {
+		userAgent = defaultUserAgent
+	}
+	req.Header.Set("User-Agent", userAgent)
 	req.Header.Set("Accept", "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
 
 	client := &http.Client{
 		Timeout: fetchTimeout,

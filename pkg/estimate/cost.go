@@ -116,7 +116,7 @@ func NormalizePricingMode(value string) PricingMode {
 	return PricingPortion
 }
 
-func EstimateLines(ctx context.Context, client *kroger.Client, locationID string, lines []string, overrides []LineOverride, mode PricingMode) (*Result, error) {
+func EstimateLines(ctx context.Context, client *kroger.Client, locationID string, lines []string, overrides []LineOverride, mode PricingMode, assist *Assist) (*Result, error) {
 	mode = NormalizePricingMode(string(mode))
 	byInput := map[string]LineOverride{}
 	for _, o := range overrides {
@@ -133,6 +133,22 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 		Lines:      make([]LineEstimate, 0, len(lines)),
 	}
 
+	type pending struct {
+		raw      string
+		parsed   ParsedLine
+		override *LineOverride
+		term     string
+		prefer   []string
+		exclude  []string
+		products []kroger.Product
+		le       LineEstimate
+		done     bool
+	}
+
+	pendings := make([]*pending, 0, len(lines))
+	names := make([]string, 0, len(lines))
+	fallbacks := map[string]string{}
+
 	for _, raw := range lines {
 		raw = strings.TrimSpace(raw)
 		if raw == "" {
@@ -143,7 +159,143 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 			cp := o
 			ov = &cp
 		}
-		line := estimateOne(ctx, client, locationID, raw, ov, mode)
+		parsed := ParseLine(raw)
+		p := &pending{
+			raw:      raw,
+			parsed:   parsed,
+			override: ov,
+			le:       LineEstimate{Input: raw},
+		}
+		if parsed.Name == "" {
+			p.le.Status = StatusSkipped
+			p.le.Reason = "could not parse ingredient"
+			p.done = true
+		} else {
+			fb := SearchTerm(parsed.Name)
+			fallbacks[normalizeName(parsed.Name)] = fb
+			names = append(names, parsed.Name)
+			p.term = fb
+		}
+		pendings = append(pendings, p)
+	}
+
+	if assist.Enabled() {
+		assist.WarmSearchHints(ctx, names, fallbacks)
+	}
+
+	choiceAsks := make([]productChoiceAsk, 0, len(pendings))
+	for _, p := range pendings {
+		if p.done {
+			continue
+		}
+		term := p.term
+		var prefer, exclude []string
+		if assist.Enabled() {
+			term, prefer, exclude = assist.resolveSearchTerm(p.parsed.Name, p.term)
+		}
+		if p.override != nil && strings.TrimSpace(p.override.SearchTerm) != "" {
+			term = strings.TrimSpace(p.override.SearchTerm)
+		}
+		p.term = term
+		p.prefer = prefer
+		p.exclude = exclude
+		p.le.SearchTerm = term
+
+		if term == "" {
+			p.le.Status = StatusSkipped
+			p.le.Reason = "empty search term"
+			p.done = true
+			continue
+		}
+		if len(term) < 3 {
+			p.le.Status = StatusSkipped
+			p.le.Reason = "search term must be at least 3 characters"
+			p.done = true
+			continue
+		}
+
+		products, err := client.SearchProducts(ctx, term, locationID, 24)
+		if err != nil {
+			p.le.Status = StatusError
+			p.le.Reason = err.Error()
+			p.done = true
+			continue
+		}
+
+		if p.override != nil {
+			preferID := strings.TrimSpace(p.override.ProductID)
+			if preferID != "" {
+				if prod, ok := findProduct(products, preferID); ok {
+					p.le = estimateWithProduct(p.parsed, prod, p.le, mode)
+					p.done = true
+					continue
+				}
+			}
+		}
+
+		filtered := filterRelevantProducts(p.parsed.Name, term, products, prefer, exclude)
+		if len(filtered) == 0 {
+			filtered = products
+		}
+		p.products = filtered
+		if len(filtered) == 0 {
+			p.le.Status = StatusSkipped
+			p.le.Reason = "no matching products found"
+			p.done = true
+			continue
+		}
+
+		if assist.Enabled() && p.override == nil {
+			cands := make([]productCandidate, 0, len(filtered))
+			for _, prod := range filtered {
+				price, size, ok := kroger.EffectivePrice(prod)
+				if !ok {
+					price, size = 0, ""
+				}
+				cands = append(cands, productCandidate{
+					ProductID:   prod.ProductID,
+					Description: prod.Description,
+					Brand:       prod.Brand,
+					Size:        size,
+					Price:       price,
+				})
+			}
+			choiceAsks = append(choiceAsks, productChoiceAsk{
+				Key:        normalizeName(p.parsed.Name) + "|" + p.raw,
+				Ingredient: p.raw,
+				SearchTerm: term,
+				Candidates: cands,
+			})
+		}
+	}
+
+	picks := map[string]string{}
+	if assist.Enabled() && len(choiceAsks) > 0 {
+		picks = assist.ChooseProducts(ctx, choiceAsks)
+	}
+
+	for _, p := range pendings {
+		if p.done {
+			out.Lines = append(out.Lines, p.le)
+			if p.le.Status == StatusOK {
+				out.Total += p.le.Estimate
+			}
+			continue
+		}
+
+		pickKey := normalizeName(p.parsed.Name) + "|" + p.raw
+		if id := picks[pickKey]; id != "" {
+			if prod, ok := findProduct(p.products, id); ok {
+				line := estimateWithProduct(p.parsed, prod, p.le, mode)
+				out.Lines = append(out.Lines, line)
+				if line.Status == StatusOK {
+					out.Total += line.Estimate
+				}
+				continue
+			}
+		}
+
+		line := finalizeCheapest(p.parsed, p.products, p.le, mode)
 		out.Lines = append(out.Lines, line)
 		if line.Status == StatusOK {
 			out.Total += line.Estimate
@@ -156,7 +308,7 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 
 // ListProductOptions returns priced Kroger products for an ingredient line.
 // searchOverride, when non-empty, replaces the derived SearchTerm for the Kroger query.
-func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, raw, searchOverride string, mode PricingMode) (*ProductOptionsResult, error) {
+func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, raw, searchOverride string, mode PricingMode, assist *Assist) (*ProductOptionsResult, error) {
 	mode = NormalizePricingMode(string(mode))
 	raw = strings.TrimSpace(raw)
 	parsed := ParseLine(raw)
@@ -167,9 +319,18 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 	if parsed.Name == "" {
 		return out, nil
 	}
+	fallback := SearchTerm(parsed.Name)
 	term := strings.TrimSpace(searchOverride)
+	var prefer, exclude []string
 	if term == "" {
-		term = SearchTerm(parsed.Name)
+		if assist.Enabled() {
+			assist.WarmSearchHints(ctx, []string{parsed.Name}, map[string]string{
+				normalizeName(parsed.Name): fallback,
+			})
+			term, prefer, exclude = assist.resolveSearchTerm(parsed.Name, fallback)
+		} else {
+			term = fallback
+		}
 	}
 	out.SearchTerm = term
 	if term == "" || len(term) < 3 {
@@ -180,7 +341,7 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 	if err != nil {
 		return nil, err
 	}
-	relevant := filterRelevantProducts(parsed.Name, term, products)
+	relevant := filterRelevantProducts(parsed.Name, term, products, prefer, exclude)
 	seen := map[string]bool{}
 	ordered := make([]kroger.Product, 0, len(products))
 	for _, p := range relevant {
@@ -198,6 +359,47 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 		}
 		seen[id] = true
 		ordered = append(ordered, p)
+	}
+
+	if assist.Enabled() && len(ordered) > 1 {
+		cands := make([]productCandidate, 0, len(ordered))
+		for _, prod := range ordered {
+			price, size, ok := kroger.EffectivePrice(prod)
+			if !ok {
+				price, size = 0, ""
+			}
+			cands = append(cands, productCandidate{
+				ProductID:   prod.ProductID,
+				Description: prod.Description,
+				Brand:       prod.Brand,
+				Size:        size,
+				Price:       price,
+			})
+		}
+		picks := assist.ChooseProducts(ctx, []productChoiceAsk{{
+			Key:        normalizeName(parsed.Name),
+			Ingredient: raw,
+			SearchTerm: term,
+			Candidates: cands,
+		}})
+		if id := picks[normalizeName(parsed.Name)]; id != "" {
+			reordered := make([]kroger.Product, 0, len(ordered))
+			var chosen *kroger.Product
+			rest := make([]kroger.Product, 0, len(ordered))
+			for i := range ordered {
+				if ordered[i].ProductID == id {
+					cp := ordered[i]
+					chosen = &cp
+					continue
+				}
+				rest = append(rest, ordered[i])
+			}
+			if chosen != nil {
+				reordered = append(reordered, *chosen)
+				reordered = append(reordered, rest...)
+				ordered = reordered
+			}
+		}
 	}
 
 	countBased := IsCountBased(parsed.Unit)
@@ -226,56 +428,12 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 	return out, nil
 }
 
-func estimateOne(ctx context.Context, client *kroger.Client, locationID, raw string, override *LineOverride, mode PricingMode) LineEstimate {
-	parsed := ParseLine(raw)
-	le := LineEstimate{Input: raw}
-
-	if parsed.Name == "" {
-		le.Status = StatusSkipped
-		le.Reason = "could not parse ingredient"
-		return le
-	}
-
-	term := SearchTerm(parsed.Name)
-	if override != nil && strings.TrimSpace(override.SearchTerm) != "" {
-		term = strings.TrimSpace(override.SearchTerm)
-	}
-	le.SearchTerm = term
-	if term == "" {
-		le.Status = StatusSkipped
-		le.Reason = "empty search term"
-		return le
-	}
-	if len(term) < 3 {
-		le.Status = StatusSkipped
-		le.Reason = "search term must be at least 3 characters"
-		return le
-	}
-
-	products, err := client.SearchProducts(ctx, term, locationID, 24)
-	if err != nil {
-		le.Status = StatusError
-		le.Reason = err.Error()
-		return le
-	}
-
-	preferID := ""
-	if override != nil {
-		preferID = strings.TrimSpace(override.ProductID)
-	}
-	if preferID != "" {
-		if p, ok := findProduct(products, preferID); ok {
-			return estimateWithProduct(parsed, p, le, mode)
-		}
-	}
-
-	products = filterRelevantProducts(parsed.Name, term, products)
+func finalizeCheapest(parsed ParsedLine, products []kroger.Product, le LineEstimate, mode PricingMode) LineEstimate {
 	if len(products) == 0 {
 		le.Status = StatusSkipped
 		le.Reason = "no matching products found"
 		return le
 	}
-
 	if IsCountBased(parsed.Unit) {
 		return estimateCount(parsed, products, le, mode)
 	}

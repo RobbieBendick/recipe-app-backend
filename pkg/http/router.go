@@ -28,7 +28,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		log.Printf("kroger credentials missing: price estimates disabled until KROGER_CLIENT_ID/SECRET are set")
 	}
 	if strings.TrimSpace(cfg.GeminiAPIKey) == "" {
-		log.Printf("gemini api key missing: recipe URL import will use structured data only")
+		log.Printf("gemini api key missing: recipe URL import and AI product matching disabled")
 	}
 
 	api := &handlers.API{
