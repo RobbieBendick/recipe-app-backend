@@ -22,7 +22,10 @@ func (a *API) ImportRecipeFromURL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	extracted, err := recipeimport.FromURL(r.Context(), body.URL)
+	extracted, err := recipeimport.FromURL(r.Context(), body.URL, recipeimport.Options{
+		GeminiAPIKey: a.GeminiAPIKey,
+		GeminiModel:  a.GeminiModel,
+	})
 	if err != nil {
 		switch {
 		case errors.Is(err, recipeimport.ErrInvalidURL):
@@ -33,6 +36,8 @@ func (a *API) ImportRecipeFromURL(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnprocessableEntity, "couldn't find recipe details on that page — try another link or fill the form manually")
 		case errors.Is(err, recipeimport.ErrFetchFailed):
 			writeError(w, http.StatusBadGateway, "couldn't load that page — check the link and try again")
+		case errors.Is(err, recipeimport.ErrAIFailed):
+			writeError(w, http.StatusBadGateway, "AI couldn't extract that recipe — try another link or fill the form manually")
 		default:
 			writeError(w, http.StatusBadGateway, "couldn't import from that URL")
 		}

@@ -11,10 +11,12 @@ import (
 )
 
 type API struct {
-	DB         *pgxpool.Pool
-	Auth       *auth.Service
-	Kroger     *kroger.Client
-	DefaultZip string
+	DB           *pgxpool.Pool
+	Auth         *auth.Service
+	Kroger       *kroger.Client
+	DefaultZip   string
+	GeminiAPIKey string
+	GeminiModel  string
 }
 
 func writeJSON(w http.ResponseWriter, status int, payload any) {

@@ -27,12 +27,17 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 	if !krogerClient.Configured() {
 		log.Printf("kroger credentials missing: price estimates disabled until KROGER_CLIENT_ID/SECRET are set")
 	}
+	if strings.TrimSpace(cfg.GeminiAPIKey) == "" {
+		log.Printf("gemini api key missing: recipe URL import will use structured data only")
+	}
 
 	api := &handlers.API{
-		DB:         pool,
-		Auth:       authService,
-		Kroger:     krogerClient,
-		DefaultZip: cfg.KrogerDefaultZip,
+		DB:           pool,
+		Auth:         authService,
+		Kroger:       krogerClient,
+		DefaultZip:   cfg.KrogerDefaultZip,
+		GeminiAPIKey: cfg.GeminiAPIKey,
+		GeminiModel:  cfg.GeminiModel,
 	}
 	r := chi.NewRouter()
 

@@ -26,6 +26,7 @@ var (
 	ErrBlockedHost  = errors.New("URL host is not allowed")
 	ErrFetchFailed  = errors.New("failed to fetch URL")
 	ErrNoRecipeData = errors.New("no recipe data found on page")
+	ErrAIFailed     = errors.New("AI extraction failed")
 )
 
 // Extracted is a best-effort recipe parsed from a web page.
@@ -41,6 +42,12 @@ type Extracted struct {
 	SourceURL   string   `json:"sourceUrl"`
 }
 
+// Options controls optional AI-assisted extraction.
+type Options struct {
+	GeminiAPIKey string
+	GeminiModel  string
+}
+
 var (
 	ldJSONScriptRe = regexp.MustCompile(`(?is)<script[^>]*type\s*=\s*["']application/ld\+json["'][^>]*>(.*?)</script>`)
 	ogTitleRe      = regexp.MustCompile(`(?is)<meta[^>]+property\s*=\s*["']og:title["'][^>]+content\s*=\s*["']([^"']+)["']`)
@@ -54,7 +61,8 @@ var (
 )
 
 // FromURL fetches the page and extracts whatever recipe fields it can.
-func FromURL(ctx context.Context, rawURL string) (*Extracted, error) {
+// When a Gemini API key is provided, AI extraction is preferred and JSON-LD fills gaps.
+func FromURL(ctx context.Context, rawURL string, opts Options) (*Extracted, error) {
 	parsed, err := validateURL(rawURL)
 	if err != nil {
 		return nil, err
@@ -65,33 +73,79 @@ func FromURL(ctx context.Context, rawURL string) (*Extracted, error) {
 		return nil, err
 	}
 
-	out := &Extracted{
+	structured := &Extracted{
 		Ingredients: []string{},
 		Steps:       []string{},
 		SourceURL:   parsed.String(),
 	}
-
 	if recipe := findRecipeJSONLD(html); recipe != nil {
-		applyJSONLD(out, recipe)
+		applyJSONLD(structured, recipe)
 	}
-
-	if out.Title == "" {
-		out.Title = firstMeta(html, ogTitleRe, ogTitleRe2)
+	if structured.Title == "" {
+		structured.Title = firstMeta(html, ogTitleRe, ogTitleRe2)
 	}
-	if out.Title == "" {
+	if structured.Title == "" {
 		if m := htmlTitleRe.FindStringSubmatch(html); len(m) == 2 {
-			out.Title = cleanText(m[1])
+			structured.Title = cleanText(m[1])
 		}
 	}
-	if out.Description == "" {
-		out.Description = firstMeta(html, ogDescRe, ogDescRe2)
+	if structured.Description == "" {
+		structured.Description = firstMeta(html, ogDescRe, ogDescRe2)
 	}
 
-	if out.Title == "" && len(out.Ingredients) == 0 && len(out.Steps) == 0 {
+	var out *Extracted
+	if strings.TrimSpace(opts.GeminiAPIKey) != "" {
+		aiOut, aiErr := extractWithGemini(ctx, opts.GeminiAPIKey, opts.GeminiModel, parsed.String(), html)
+		if aiErr == nil && hasUsefulRecipe(aiOut) {
+			out = aiOut
+			fillGaps(out, structured)
+		} else if hasUsefulRecipe(structured) {
+			out = structured
+		} else if aiErr != nil {
+			return nil, fmt.Errorf("%w: %v", ErrAIFailed, aiErr)
+		}
+	} else {
+		out = structured
+	}
+
+	if !hasUsefulRecipe(out) {
 		return nil, ErrNoRecipeData
 	}
-
+	if out.Ingredients == nil {
+		out.Ingredients = []string{}
+	}
+	if out.Steps == nil {
+		out.Steps = []string{}
+	}
+	out.SourceURL = parsed.String()
 	return out, nil
+}
+
+func fillGaps(dst, src *Extracted) {
+	if dst == nil || src == nil {
+		return
+	}
+	if dst.Title == "" {
+		dst.Title = src.Title
+	}
+	if dst.Description == "" {
+		dst.Description = src.Description
+	}
+	if len(dst.Ingredients) == 0 && len(src.Ingredients) > 0 {
+		dst.Ingredients = src.Ingredients
+	}
+	if len(dst.Steps) == 0 && len(src.Steps) > 0 {
+		dst.Steps = src.Steps
+	}
+	if dst.PrepMinutes == 0 {
+		dst.PrepMinutes = src.PrepMinutes
+	}
+	if dst.CookMinutes == 0 {
+		dst.CookMinutes = src.CookMinutes
+	}
+	if dst.Servings == 0 {
+		dst.Servings = src.Servings
+	}
 }
 
 func validateURL(raw string) (*url.URL, error) {
