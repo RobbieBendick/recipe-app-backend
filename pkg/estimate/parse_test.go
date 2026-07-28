@@ -1,6 +1,9 @@
 package estimate
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestParseGluedOz(t *testing.T) {
 	p := ParseLine("32oz chocolate chips")
@@ -43,6 +46,54 @@ func TestParseMixedCupsStillWorks(t *testing.T) {
 	}
 	if p.Name != "sugar" {
 		t.Fatalf("name=%q want sugar", p.Name)
+	}
+}
+
+func TestParseSizedCan(t *testing.T) {
+	p := ParseLine("1 (15-ounce) can black beans (rinsed and drained)")
+	if p.Quantity != 1 || p.Unit != "can" || p.Name != "black beans" {
+		t.Fatalf("got qty=%v unit=%q name=%q", p.Quantity, p.Unit, p.Name)
+	}
+	if term := SearchTerm(p.Name); term != "black beans" {
+		t.Fatalf("search=%q", term)
+	}
+}
+
+func TestParseOilAlternative(t *testing.T) {
+	p := ParseLine("2 tbsp avocado oil (or olive oil)")
+	if p.Unit != "tbsp" || p.Name != "avocado oil" {
+		t.Fatalf("got unit=%q name=%q", p.Unit, p.Name)
+	}
+}
+
+func TestParseBatchAndChicken(t *testing.T) {
+	p := ParseLine("1 batch red enchilada sauce")
+	if p.Name != "red enchilada sauce" {
+		t.Fatalf("name=%q", p.Name)
+	}
+	p = ParseLine("1 1/2 lb boneless skinless chicken breasts (diced into small 1/2-inch pieces)")
+	if p.Quantity != 1.5 || p.Unit != "lb" {
+		t.Fatalf("qty=%v unit=%q", p.Quantity, p.Unit)
+	}
+	if p.Name != "boneless skinless chicken breasts" {
+		t.Fatalf("name=%q", p.Name)
+	}
+	if term := SearchTerm(p.Name); len(strings.Fields(term)) > 8 {
+		t.Fatalf("search too long: %q", term)
+	}
+}
+
+func TestPackageCountFromDescription(t *testing.T) {
+	count, ok := PackageCount("40 oz", "Mission Large Flour Burrito Tortillas 16 Count")
+	if !ok || count != 16 {
+		t.Fatalf("count=%v ok=%v", count, ok)
+	}
+}
+
+func TestClampSearchTerm(t *testing.T) {
+	got := ClampSearchTerm("a b c d e f g h i j", 8)
+	if got != "a b c d e f g h" {
+		t.Fatalf("got %q", got)
 	}
 }
 

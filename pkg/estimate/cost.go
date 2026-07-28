@@ -196,10 +196,11 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 		if p.override != nil && strings.TrimSpace(p.override.SearchTerm) != "" {
 			term = strings.TrimSpace(p.override.SearchTerm)
 		}
-		p.term = term
+		p.term = ClampSearchTerm(term, 8)
 		p.prefer = prefer
 		p.exclude = exclude
-		p.le.SearchTerm = term
+		p.le.SearchTerm = p.term
+		term = p.term
 
 		if term == "" {
 			p.le.Status = StatusSkipped
@@ -215,6 +216,19 @@ func EstimateLines(ctx context.Context, client *kroger.Client, locationID string
 		}
 
 		products, err := client.SearchProducts(ctx, term, locationID, 24)
+		if err != nil || len(products) == 0 {
+			// Retry with a shorter core query when AI/alias terms are too specific.
+			short := shortenSearchTerm(term)
+			if short != "" && short != term {
+				if retry, retryErr := client.SearchProducts(ctx, short, locationID, 24); retryErr == nil && len(retry) > 0 {
+					products = retry
+					err = nil
+					p.term = short
+					p.le.SearchTerm = short
+					term = short
+				}
+			}
+		}
 		if err != nil {
 			p.le.Status = StatusError
 			p.le.Reason = err.Error()
@@ -332,12 +346,23 @@ func ListProductOptions(ctx context.Context, client *kroger.Client, locationID, 
 			term = fallback
 		}
 	}
+	term = ClampSearchTerm(term, 8)
 	out.SearchTerm = term
 	if term == "" || len(term) < 3 {
 		return out, nil
 	}
 
 	products, err := client.SearchProducts(ctx, term, locationID, 24)
+	if (err != nil || len(products) == 0) && searchOverride == "" {
+		if short := shortenSearchTerm(term); short != "" && short != term {
+			if retry, retryErr := client.SearchProducts(ctx, short, locationID, 24); retryErr == nil && len(retry) > 0 {
+				products = retry
+				err = nil
+				term = short
+				out.SearchTerm = short
+			}
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -538,6 +563,15 @@ func overrideKey(input string) string {
 	return strings.ToLower(strings.TrimSpace(input))
 }
 
+func shortenSearchTerm(term string) string {
+	fields := strings.Fields(strings.TrimSpace(term))
+	if len(fields) <= 3 {
+		return ClampSearchTerm(term, 8)
+	}
+	// Keep the last 3 content words — usually the product ("black beans", "chicken breasts").
+	return strings.Join(fields[len(fields)-3:], " ")
+}
+
 func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate, mode PricingMode) LineEstimate {
 	need := parsed.Quantity
 	if need <= 0 {
@@ -558,13 +592,9 @@ func estimateCount(parsed ParsedLine, products []kroger.Product, le LineEstimate
 		if !ok {
 			continue
 		}
-		_, count, isCount, ok := PackageToGrams(size)
-		if !ok {
+		pkgCount, ok := PackageCount(size, p.Description)
+		if !ok || pkgCount <= 0 {
 			continue
-		}
-		pkgCount := 1.0
-		if isCount && count > 0 {
-			pkgCount = count
 		}
 		pkgs := packagesNeeded(need, pkgCount)
 		per := DollarPerCount(price, pkgCount)
@@ -618,13 +648,9 @@ func productOption(parsed ParsedLine, p kroger.Product, countBased bool, gramsNe
 		if need <= 0 {
 			need = 1
 		}
-		_, count, isCount, ok := PackageToGrams(size)
-		if !ok {
+		pkgCount, ok := PackageCount(size, p.Description)
+		if !ok || pkgCount <= 0 {
 			return ProductOption{}, false
-		}
-		pkgCount := 1.0
-		if isCount && count > 0 {
-			pkgCount = count
 		}
 		pkgs := packagesNeeded(need, pkgCount)
 		per := DollarPerCount(price, pkgCount)

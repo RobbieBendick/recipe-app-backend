@@ -403,11 +403,31 @@ func NeedToGrams(qty float64, unit, name string) (grams float64, ok bool, reason
 
 func IsCountBased(unit string) bool {
 	switch strings.ToLower(strings.TrimSpace(unit)) {
-	case "", "count", "clove", "slice", "bunch", "can", "package":
+	case "", "count", "clove", "slice", "bunch", "can", "jar", "package":
 		return true
 	default:
 		return false
 	}
+}
+
+var countInTextRE = regexp.MustCompile(`(?i)(\d+(?:\.\d+)?)\s*(?:ct|count|pk|pack)\b`)
+
+// PackageCount returns how many discrete items are in a Kroger package.
+// Prefers explicit count sizing ("16 ct") and falls back to counts in the description
+// when size is weight-only (e.g. tortillas: size "40 oz", description "16 Count").
+func PackageCount(size, description string) (float64, bool) {
+	if _, count, isCount, ok := PackageToGrams(size); ok && isCount && count > 0 {
+		return count, true
+	}
+	for _, text := range []string{description, size} {
+		if m := countInTextRE.FindStringSubmatch(text); m != nil {
+			amount, err := strconv.ParseFloat(m[1], 64)
+			if err == nil && amount > 0 {
+				return amount, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // PackageToGrams parses Kroger size strings like "4 lb", "16 oz", "1 gallon" into grams.

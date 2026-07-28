@@ -29,6 +29,7 @@ var (
 		"clove": "clove", "cloves": "clove",
 		"pinch": "pinch", "pinches": "pinch",
 		"can": "can", "cans": "can",
+		"jar": "jar", "jars": "jar",
 		"package": "package", "packages": "package", "pkg": "package",
 		"slice": "slice", "slices": "slice",
 		"bunch": "bunch", "bunches": "bunch",
@@ -38,10 +39,19 @@ var (
 	// "32oz sugar", "2 cups flour", "3 1/2 cups sugar"
 	withUnitRE = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s*(` + unitPattern + `)\b\.?(?:\s+of)?\s+(.+)$`)
 	// "2 32oz chocolate chips" → 2 × 32 oz (size qty is not a mixed number)
-	sizeQtyPattern = `(?:\d+/\d+|\d+\.\d+|\d+)`
+	sizeQtyPattern   = `(?:\d+/\d+|\d+\.\d+|\d+)`
 	countTimesSizeRE = regexp.MustCompile(`(?i)^(\d+(?:\.\d+)?)\s+(` + sizeQtyPattern + `)\s*(` + unitPattern + `)\b\.?(?:\s+of)?\s+(.+)$`)
+	// "1 (15-ounce) can black beans" / "2 (4 oz) cans diced green chile"
+	sizedContainerRE = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s*\((\d+(?:\.\d+)?)\s*-?\s*(oz|ounce|ounces|g|gram|grams|lb|lbs|pound|pounds)\)\s+(cans?|jars?|packages?|pkgs?|boxes?|bags?)\s+(.+)$`)
+	// "1 can black beans"
+	plainContainerRE = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s+(cans?|jars?|packages?|pkgs?|boxes?|bags?)\s+(.+)$`)
+	// "1 batch red enchilada sauce"
+	batchRE   = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s+batch(?:es)?\s+(.+)$`)
 	qtyOnlyRE = regexp.MustCompile(`(?i)^(` + qtyPattern + `)\s+(.+)$`)
 	emojiRE   = regexp.MustCompile(`^[\x{1F300}-\x{1FAFF}\x{2600}-\x{27BF}\x{FE0F}\x{200D}]+\s*`)
+	parensRE  = regexp.MustCompile(`\([^)]*\)`)
+	prepCutRE = regexp.MustCompile(`(?i)\s+(?:diced|chopped|minced|sliced|cubed|cut)\s+into\b.*$`)
+	trailPrepRE = regexp.MustCompile(`(?i),?\s*(?:rinsed and drained|drained and rinsed|rinsed|drained|patted dry|to taste|divided|softened|melted|room temperature)\s*$`)
 )
 
 func buildUnitPattern() string {
@@ -120,13 +130,50 @@ func ParseLine(line string) ParsedLine {
 		return ParsedLine{Quantity: 1, Raw: line}
 	}
 
+	// "1 (15-ounce) can black beans (rinsed and drained)"
+	if m := sizedContainerRE.FindStringSubmatch(cleaned); m != nil {
+		label := strings.Join(strings.Fields(m[5]), " ")
+		name := simplifyIngredientName(label)
+		return ParsedLine{
+			Quantity: parseQuantity(m[1]),
+			Unit:     normalizeUnit(m[4]),
+			Name:     name,
+			Label:    label,
+			Raw:      line,
+		}
+	}
+
+	// "1 can black beans"
+	if m := plainContainerRE.FindStringSubmatch(cleaned); m != nil {
+		label := strings.Join(strings.Fields(m[3]), " ")
+		return ParsedLine{
+			Quantity: parseQuantity(m[1]),
+			Unit:     normalizeUnit(m[2]),
+			Name:     simplifyIngredientName(label),
+			Label:    label,
+			Raw:      line,
+		}
+	}
+
+	// "1 batch red enchilada sauce"
+	if m := batchRE.FindStringSubmatch(cleaned); m != nil {
+		label := strings.Join(strings.Fields(m[2]), " ")
+		return ParsedLine{
+			Quantity: parseQuantity(m[1]),
+			Unit:     "",
+			Name:     simplifyIngredientName(label),
+			Label:    label,
+			Raw:      line,
+		}
+	}
+
 	// Prefer mixed measures like "3 1/2 cups" over "count × size".
 	if m := withUnitRE.FindStringSubmatch(cleaned); m != nil {
 		label := strings.Join(strings.Fields(m[3]), " ")
 		return ParsedLine{
 			Quantity: parseQuantity(m[1]),
 			Unit:     normalizeUnit(m[2]),
-			Name:     normalizeName(label),
+			Name:     simplifyIngredientName(label),
 			Label:    label,
 			Raw:      line,
 		}
@@ -140,7 +187,7 @@ func ParseLine(line string) ParsedLine {
 		return ParsedLine{
 			Quantity: count * size,
 			Unit:     normalizeUnit(m[3]),
-			Name:     normalizeName(label),
+			Name:     simplifyIngredientName(label),
 			Label:    label,
 			Raw:      line,
 		}
@@ -151,7 +198,7 @@ func ParseLine(line string) ParsedLine {
 		return ParsedLine{
 			Quantity: parseQuantity(m[1]),
 			Unit:     "",
-			Name:     normalizeName(label),
+			Name:     simplifyIngredientName(label),
 			Label:    label,
 			Raw:      line,
 		}
@@ -161,15 +208,44 @@ func ParseLine(line string) ParsedLine {
 	return ParsedLine{
 		Quantity: 1,
 		Unit:     "",
-		Name:     normalizeName(label),
+		Name:     simplifyIngredientName(label),
 		Label:    label,
 		Raw:      line,
 	}
 }
 
+// simplifyIngredientName strips prep notes and alternatives for grocery search.
+func simplifyIngredientName(label string) string {
+	label = parensRE.ReplaceAllString(label, " ")
+	label = strings.Join(strings.Fields(label), " ")
+	lower := strings.ToLower(label)
+	if i := strings.Index(lower, " or "); i > 0 {
+		label = strings.TrimSpace(label[:i])
+		lower = strings.ToLower(label)
+	}
+	if m := prepCutRE.FindStringIndex(label); m != nil && m[0] > 0 {
+		label = strings.TrimSpace(label[:m[0]])
+	}
+	label = trailPrepRE.ReplaceAllString(label, "")
+	return normalizeName(label)
+}
+
 // SearchTerm strips parenthetical notes and applies ingredient search aliases.
 func SearchTerm(name string) string {
-	name = regexp.MustCompile(`\([^)]*\)`).ReplaceAllString(name, " ")
-	name = normalizeName(name)
-	return resolveSearchTerm(name)
+	name = simplifyIngredientName(name)
+	name = resolveSearchTerm(name)
+	return ClampSearchTerm(name, 8)
+}
+
+// ClampSearchTerm keeps Kroger happy (PRODUCT-2019: max 8 terms).
+func ClampSearchTerm(term string, maxWords int) string {
+	term = strings.Join(strings.Fields(strings.TrimSpace(term)), " ")
+	if maxWords <= 0 {
+		maxWords = 8
+	}
+	fields := strings.Fields(term)
+	if len(fields) > maxWords {
+		fields = fields[:maxWords]
+	}
+	return strings.Join(fields, " ")
 }

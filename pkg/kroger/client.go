@@ -281,6 +281,10 @@ func (c *Client) SearchLocations(ctx context.Context, zip string, limit int) ([]
 
 func (c *Client) SearchProducts(ctx context.Context, term, locationID string, limit int) ([]Product, error) {
 	term = strings.TrimSpace(term)
+	// Kroger PRODUCT-2019: max 8 individual terms per search.
+	if fields := strings.Fields(term); len(fields) > 8 {
+		term = strings.Join(fields[:8], " ")
+	}
 	locationID = NormalizeLocationID(locationID)
 	if len(term) < 3 {
 		return nil, fmt.Errorf("search term must be at least 3 characters (got %q)", term)

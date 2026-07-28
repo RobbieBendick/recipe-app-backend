@@ -120,10 +120,12 @@ func (a *Assist) WarmSearchHints(ctx context.Context, names []string, fallbacks 
 	var prompt strings.Builder
 	prompt.WriteString("You help match recipe ingredients to grocery products at Kroger.\n")
 	prompt.WriteString("For each ingredient, choose a short Kroger product search query that finds the correct pantry/grocery item.\n")
+	prompt.WriteString("searchTerm MUST be at most 5 plain words (Kroger rejects longer queries).\n")
+	prompt.WriteString("Prefer the core grocery product (e.g. \"black beans\", \"chicken breast\", \"flour tortillas\").\n")
+	prompt.WriteString("Drop prep words like rinsed, drained, diced into, boneless notes unless needed to identify the product.\n")
 	prompt.WriteString("Avoid desserts, candy, ice cream, prepared meals, and unrelated products when the ingredient is a cooking staple.\n")
 	prompt.WriteString("prefer: words that should appear in a good product title.\n")
 	prompt.WriteString("exclude: words that indicate a wrong product.\n")
-	prompt.WriteString("searchTerm: 2-5 words, plain grocery language.\n")
 	prompt.WriteString("Return one item per input name.\n\n")
 	rawAsks, _ := json.Marshal(asks)
 	prompt.WriteString(string(rawAsks))
@@ -177,6 +179,7 @@ func (a *Assist) WarmSearchHints(ctx context.Context, names []string, fallbacks 
 		if len(term) < 3 {
 			term = strings.TrimSpace(fallbacks[key])
 		}
+		term = ClampSearchTerm(term, 5)
 		if term == "" {
 			continue
 		}
@@ -304,10 +307,10 @@ func (a *Assist) ChooseProducts(ctx context.Context, asks []productChoiceAsk) ma
 }
 
 func (a *Assist) resolveSearchTerm(name, fallback string) (term string, prefer, exclude []string) {
-	term = strings.TrimSpace(fallback)
+	term = ClampSearchTerm(strings.TrimSpace(fallback), 8)
 	if h, ok := a.hintFor(name); ok {
 		if strings.TrimSpace(h.SearchTerm) != "" {
-			term = strings.TrimSpace(h.SearchTerm)
+			term = ClampSearchTerm(strings.TrimSpace(h.SearchTerm), 5)
 		}
 		prefer = h.Prefer
 		exclude = h.Exclude

@@ -101,6 +101,61 @@ var ingredientRules = []IngredientRule{
 			"olive", "spray", "essential", "hair", "skin", "supplement",
 		},
 	},
+	{
+		Names:        []string{"black beans", "canned black beans"},
+		NameContains: []string{"black bean"},
+		SearchAs:     "black beans",
+		Prefer:       []string{"black bean"},
+		Exclude:      []string{"refried", "soup", "burrito", "seasoned rice", "chip"},
+	},
+	{
+		Names:        []string{"green chile", "green chiles", "diced green chile", "diced green chiles", "green chili", "diced green chili"},
+		NameContains: []string{"green chile", "green chili"},
+		SearchAs:     "diced green chiles",
+		Prefer:       []string{"green chile", "green chili"},
+		Exclude:      []string{"sauce", "salsa", "seasoning", "powder"},
+	},
+	{
+		Names:        []string{"enchilada sauce", "red enchilada sauce", "green enchilada sauce"},
+		NameContains: []string{"enchilada sauce"},
+		SearchAs:     "enchilada sauce",
+		Prefer:       []string{"enchilada sauce"},
+		Exclude:      []string{"kit", "dinner", "seasoning", "tortilla"},
+	},
+	{
+		Names:        []string{"avocado oil"},
+		NameContains: []string{"avocado oil"},
+		SearchAs:     "avocado oil",
+		Prefer:       []string{"avocado oil"},
+		Exclude:      []string{"spray", "mayo", "mayonnaise", "dressing", "guac"},
+	},
+	{
+		Names:        []string{"chicken breast", "chicken breasts", "boneless skinless chicken breast", "boneless skinless chicken breasts"},
+		NameContains: []string{"chicken breast"},
+		SearchAs:     "chicken breast",
+		Prefer:       []string{"chicken breast"},
+		Exclude:      []string{"nugget", "patty", "tender", "salad", "soup", "broth", "seasoning"},
+	},
+	{
+		Names:        []string{"flour tortilla", "flour tortillas", "large flour tortillas"},
+		NameContains: []string{"flour tortilla"},
+		SearchAs:     "flour tortillas",
+		Prefer:       []string{"flour tortilla"},
+		Exclude:      []string{"chip", "bowl", "kit", "wrap sandwich"},
+	},
+	{
+		Names: []string{
+			"mexican blend shredded cheese",
+			"mexican-blend shredded cheese",
+			"shredded mexican cheese",
+			"mexican style shredded cheese",
+			"shredded mexican style cheese",
+		},
+		NameContains: []string{"mexican blend", "mexican-blend", "mexican style cheese"},
+		SearchAs:     "mexican shredded cheese",
+		Prefer:       []string{"mexican", "shredded"},
+		Exclude:      []string{"sauce", "dip", "snack"},
+	},
 }
 
 // Global soft penalties applied when no Prefer rule boosts the product.
