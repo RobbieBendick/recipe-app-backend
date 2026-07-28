@@ -12,14 +12,17 @@ import (
 )
 
 type Recipe struct {
-	ID          string    `json:"id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Emoji       string    `json:"emoji"`
-	Ingredients []string  `json:"ingredients"`
-	Steps       []string  `json:"steps"`
-	CreatedAt   time.Time `json:"createdAt"`
-	UpdatedAt   time.Time `json:"updatedAt"`
+	ID           string    `json:"id"`
+	Title        string    `json:"title"`
+	Description  string    `json:"description"`
+	Emoji        string    `json:"emoji"`
+	Ingredients  []string  `json:"ingredients"`
+	Steps        []string  `json:"steps"`
+	PrepMinutes  int       `json:"prepMinutes"`
+	CookMinutes  int       `json:"cookMinutes"`
+	Servings     int       `json:"servings"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
 
 type RecipeInput struct {
@@ -28,6 +31,9 @@ type RecipeInput struct {
 	Emoji       string   `json:"emoji"`
 	Ingredients []string `json:"ingredients"`
 	Steps       []string `json:"steps"`
+	PrepMinutes int      `json:"prepMinutes"`
+	CookMinutes int      `json:"cookMinutes"`
+	Servings    int      `json:"servings"`
 }
 
 type ShoppingListItem struct {
@@ -59,7 +65,9 @@ type ShoppingListInput struct {
 
 func ListRecipes(ctx context.Context, pool *pgxpool.Pool, userID string) ([]Recipe, error) {
 	rows, err := pool.Query(ctx, `
-		SELECT id, title, description, emoji, ingredients, steps, created_at, updated_at
+		SELECT id, title, description, emoji, ingredients, steps,
+			COALESCE(prep_minutes, 0), COALESCE(cook_minutes, 0), COALESCE(servings, 0),
+			created_at, updated_at
 		FROM recipes
 		WHERE user_id = $1
 		ORDER BY updated_at DESC
@@ -85,7 +93,9 @@ func ListRecipes(ctx context.Context, pool *pgxpool.Pool, userID string) ([]Reci
 
 func GetRecipe(ctx context.Context, pool *pgxpool.Pool, userID, id string) (*Recipe, error) {
 	row := pool.QueryRow(ctx, `
-		SELECT id, title, description, emoji, ingredients, steps, created_at, updated_at
+		SELECT id, title, description, emoji, ingredients, steps,
+			COALESCE(prep_minutes, 0), COALESCE(cook_minutes, 0), COALESCE(servings, 0),
+			created_at, updated_at
 		FROM recipes
 		WHERE id = $1 AND user_id = $2
 	`, id, userID)
@@ -101,10 +111,13 @@ func GetRecipe(ctx context.Context, pool *pgxpool.Pool, userID, id string) (*Rec
 
 func CreateRecipe(ctx context.Context, pool *pgxpool.Pool, userID string, in RecipeInput) (*Recipe, error) {
 	row := pool.QueryRow(ctx, `
-		INSERT INTO recipes (user_id, title, description, emoji, ingredients, steps)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		RETURNING id, title, description, emoji, ingredients, steps, created_at, updated_at
-	`, userID, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps)
+		INSERT INTO recipes (user_id, title, description, emoji, ingredients, steps, prep_minutes, cook_minutes, servings)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		RETURNING id, title, description, emoji, ingredients, steps,
+			COALESCE(prep_minutes, 0), COALESCE(cook_minutes, 0), COALESCE(servings, 0),
+			created_at, updated_at
+	`, userID, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps,
+		clampNonNeg(in.PrepMinutes), clampNonNeg(in.CookMinutes), clampNonNeg(in.Servings))
 	r, err := scanRecipe(row)
 	if err != nil {
 		return nil, err
@@ -120,10 +133,16 @@ func UpdateRecipe(ctx context.Context, pool *pgxpool.Pool, userID, id string, in
 			emoji = $5,
 			ingredients = $6,
 			steps = $7,
+			prep_minutes = $8,
+			cook_minutes = $9,
+			servings = $10,
 			updated_at = now()
 		WHERE id = $1 AND user_id = $2
-		RETURNING id, title, description, emoji, ingredients, steps, created_at, updated_at
-	`, id, userID, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps)
+		RETURNING id, title, description, emoji, ingredients, steps,
+			COALESCE(prep_minutes, 0), COALESCE(cook_minutes, 0), COALESCE(servings, 0),
+			created_at, updated_at
+	`, id, userID, in.Title, in.Description, in.Emoji, in.Ingredients, in.Steps,
+		clampNonNeg(in.PrepMinutes), clampNonNeg(in.CookMinutes), clampNonNeg(in.Servings))
 	r, err := scanRecipe(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
@@ -132,6 +151,16 @@ func UpdateRecipe(ctx context.Context, pool *pgxpool.Pool, userID, id string, in
 		return nil, err
 	}
 	return &r, nil
+}
+
+func clampNonNeg(n int) int {
+	if n < 0 {
+		return 0
+	}
+	if n > 9999 {
+		return 9999
+	}
+	return n
 }
 
 func DeleteRecipe(ctx context.Context, pool *pgxpool.Pool, userID, id string) (bool, error) {
@@ -150,7 +179,11 @@ func scanRecipe(row scannable) (Recipe, error) {
 	var r Recipe
 	var ingredients []string
 	var steps []string
-	err := row.Scan(&r.ID, &r.Title, &r.Description, &r.Emoji, &ingredients, &steps, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(
+		&r.ID, &r.Title, &r.Description, &r.Emoji, &ingredients, &steps,
+		&r.PrepMinutes, &r.CookMinutes, &r.Servings,
+		&r.CreatedAt, &r.UpdatedAt,
+	)
 	if err != nil {
 		return r, err
 	}

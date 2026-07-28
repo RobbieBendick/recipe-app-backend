@@ -65,6 +65,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			r.Route("/recipes", func(r chi.Router) {
 				r.Get("/", api.ListRecipes)
 				r.Post("/", api.CreateRecipe)
+				r.Post("/import-url", api.ImportRecipeFromURL)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", api.GetRecipe)
 					r.Put("/", api.UpdateRecipe)
