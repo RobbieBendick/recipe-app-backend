@@ -39,11 +39,11 @@ type geminiContent struct {
 
 type geminiPart struct {
 	Text       string            `json:"text,omitempty"`
-	InlineData *geminiInlineData `json:"inline_data,omitempty"`
+	InlineData *geminiInlineData `json:"inlineData,omitempty"`
 }
 
 type geminiInlineData struct {
-	MimeType string `json:"mime_type"`
+	MimeType string `json:"mimeType"`
 	Data     string `json:"data"`
 }
 
@@ -55,16 +55,42 @@ type geminiGenerationConfig struct {
 
 type geminiResponse struct {
 	Candidates []struct {
-		Content struct {
+		FinishReason string `json:"finishReason"`
+		Content      struct {
 			Parts []struct {
-				Text string `json:"text"`
+				Text    string `json:"text"`
+				Thought bool   `json:"thought"`
 			} `json:"parts"`
 		} `json:"content"`
 	} `json:"candidates"`
+	PromptFeedback *struct {
+		BlockReason string `json:"blockReason"`
+	} `json:"promptFeedback"`
 	Error *struct {
 		Message string `json:"message"`
 		Status  string `json:"status"`
 	} `json:"error"`
+}
+
+func geminiResponseText(res geminiResponse) string {
+	if len(res.Candidates) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, part := range res.Candidates[0].Content.Parts {
+		if part.Thought {
+			continue
+		}
+		text := strings.TrimSpace(part.Text)
+		if text == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(text)
+	}
+	return b.String()
 }
 
 type geminiRecipeJSON struct {
@@ -174,11 +200,10 @@ func extractWithGeminiText(ctx context.Context, apiKey, model, pageURL, pageText
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return nil, fmt.Errorf("gemini status %d", res.StatusCode)
 	}
-	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
+	text := strings.TrimSpace(geminiResponseText(parsed))
+	if text == "" {
 		return nil, fmt.Errorf("gemini returned no content")
 	}
-
-	text := strings.TrimSpace(parsed.Candidates[0].Content.Parts[0].Text)
 	text = strings.TrimPrefix(text, "```json")
 	text = strings.TrimPrefix(text, "```")
 	text = strings.TrimSuffix(text, "```")

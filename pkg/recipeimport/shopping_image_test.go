@@ -59,3 +59,18 @@ func TestShoppingImagePromptMentionsGroceries(t *testing.T) {
 		t.Fatal("prompt should mention handwritten lists")
 	}
 }
+
+func TestExtractJSONObject(t *testing.T) {
+	raw := "Here you go:\n```json\n{\"title\":\"Shop\",\"items\":[\"Milk\"]}\n```"
+	got := extractJSONObject(raw)
+	if !strings.Contains(got, `"Milk"`) {
+		t.Fatalf("extracted %q", got)
+	}
+}
+
+func TestParseShoppingItemsFromString(t *testing.T) {
+	items := parseShoppingItems([]byte(`"Milk\nEggs"`))
+	if len(items) != 2 {
+		t.Fatalf("got %#v", items)
+	}
+}

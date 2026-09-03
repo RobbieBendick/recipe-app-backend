@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -23,8 +24,8 @@ type ShoppingListExtract struct {
 }
 
 type geminiShoppingJSON struct {
-	Title string   `json:"title"`
-	Items []string `json:"items"`
+	Title string          `json:"title"`
+	Items json.RawMessage `json:"items"`
 }
 
 var allowedImageMIMEs = map[string]string{
@@ -64,11 +65,11 @@ func FromImage(ctx context.Context, apiKey, model, mimeType, imageBase64 string)
 	payload := geminiRequest{
 		Contents: []geminiContent{{
 			Parts: []geminiPart{
-				{Text: shoppingImagePrompt()},
 				{InlineData: &geminiInlineData{
 					MimeType: mime,
 					Data:     base64.StdEncoding.EncodeToString(data),
 				}},
+				{Text: shoppingImagePrompt()},
 			},
 		}},
 		GenerationConfig: geminiGenerationConfig{
@@ -118,27 +119,31 @@ func FromImage(ctx context.Context, apiKey, model, mimeType, imageBase64 string)
 		return nil, fmt.Errorf("%w: invalid gemini response", ErrAIFailed)
 	}
 	if parsed.Error != nil && parsed.Error.Message != "" {
+		log.Printf("shopping image gemini error: %s", parsed.Error.Message)
 		return nil, fmt.Errorf("%w: %s", ErrAIFailed, parsed.Error.Message)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		log.Printf("shopping image gemini status %d: %s", res.StatusCode, truncateRunes(string(raw), 400))
 		return nil, fmt.Errorf("%w: gemini status %d", ErrAIFailed, res.StatusCode)
 	}
-	if len(parsed.Candidates) == 0 || len(parsed.Candidates[0].Content.Parts) == 0 {
+	if parsed.PromptFeedback != nil && parsed.PromptFeedback.BlockReason != "" {
+		log.Printf("shopping image gemini blocked: %s", parsed.PromptFeedback.BlockReason)
+		return nil, fmt.Errorf("%w: gemini blocked the photo", ErrAIFailed)
+	}
+
+	text := extractJSONObject(geminiResponseText(parsed))
+	if text == "" {
+		log.Printf("shopping image gemini empty response")
 		return nil, fmt.Errorf("%w: gemini returned no content", ErrAIFailed)
 	}
 
-	text := strings.TrimSpace(parsed.Candidates[0].Content.Parts[0].Text)
-	text = strings.TrimPrefix(text, "```json")
-	text = strings.TrimPrefix(text, "```")
-	text = strings.TrimSuffix(text, "```")
-	text = strings.TrimSpace(text)
-
 	var parsedList geminiShoppingJSON
 	if err := json.Unmarshal([]byte(text), &parsedList); err != nil {
+		log.Printf("shopping image gemini json parse: %v; body=%s", err, truncateRunes(text, 400))
 		return nil, fmt.Errorf("%w: gemini json parse: %v", ErrAIFailed, err)
 	}
 
-	items := normalizeStringList(parsedList.Items)
+	items := normalizeStringList(parseShoppingItems(parsedList.Items))
 	if len(items) > maxShoppingListItems {
 		items = items[:maxShoppingListItems]
 	}
@@ -150,6 +155,42 @@ func FromImage(ctx context.Context, apiKey, model, mimeType, imageBase64 string)
 		Title: cleanText(parsedList.Title),
 		Items: items,
 	}, nil
+}
+
+func parseShoppingItems(raw json.RawMessage) []string {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return nil
+	}
+	var list []string
+	if err := json.Unmarshal(raw, &list); err == nil {
+		return list
+	}
+	var one string
+	if err := json.Unmarshal(raw, &one); err == nil {
+		return strings.Split(one, "\n")
+	}
+	return nil
+}
+
+func extractJSONObject(text string) string {
+	text = strings.TrimSpace(text)
+	text = strings.TrimPrefix(text, "```json")
+	text = strings.TrimPrefix(text, "```")
+	text = strings.TrimSuffix(text, "```")
+	text = strings.TrimSpace(text)
+	if json.Valid([]byte(text)) {
+		return text
+	}
+	start := strings.Index(text, "{")
+	end := strings.LastIndex(text, "}")
+	if start >= 0 && end > start {
+		snippet := strings.TrimSpace(text[start : end+1])
+		if json.Valid([]byte(snippet)) {
+			return snippet
+		}
+	}
+	return text
 }
 
 func shoppingImagePrompt() string {
