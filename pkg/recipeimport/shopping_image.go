@@ -53,7 +53,7 @@ func FromImage(ctx context.Context, apiKey, model, mimeType, imageBase64 string)
 
 	model = strings.TrimSpace(model)
 	if model == "" {
-		model = "gemini-2.0-flash"
+		model = "gemini-3.6-flash"
 	}
 
 	endpoint := fmt.Sprintf(

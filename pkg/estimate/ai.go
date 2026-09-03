@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	aiTimeout      = 45 * time.Second
+	aiTimeout       = 45 * time.Second
 	aiMaxCandidates = 12
 )
 
@@ -41,10 +41,10 @@ type productCandidate struct {
 }
 
 type productChoiceAsk struct {
-	Key         string
-	Ingredient  string
-	SearchTerm  string
-	Candidates  []productCandidate
+	Key        string
+	Ingredient string
+	SearchTerm string
+	Candidates []productCandidate
 }
 
 func NewAssist(apiKey, model string) *Assist {
@@ -54,7 +54,7 @@ func NewAssist(apiKey, model string) *Assist {
 	}
 	model = strings.TrimSpace(model)
 	if model == "" {
-		model = "gemini-2.0-flash"
+		model = "gemini-3.6-flash"
 	}
 	return &Assist{
 		APIKey:      apiKey,

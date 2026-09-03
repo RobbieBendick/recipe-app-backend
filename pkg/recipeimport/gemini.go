@@ -118,7 +118,7 @@ func extractWithGeminiText(ctx context.Context, apiKey, model, pageURL, pageText
 	}
 	model = strings.TrimSpace(model)
 	if model == "" {
-		model = "gemini-2.0-flash"
+		model = "gemini-3.6-flash"
 	}
 	pageText = strings.TrimSpace(pageText)
 	if pageText == "" {

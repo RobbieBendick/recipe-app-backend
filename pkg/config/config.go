@@ -36,7 +36,7 @@ func Load() Config {
 		KrogerAPIBaseURL:     getEnv("KROGER_API_BASE_URL", "https://api-ce.kroger.com/v1"),
 		KrogerDefaultZip:     getEnv("KROGER_DEFAULT_ZIP", "45202"),
 		GeminiAPIKey:         resolveGeminiAPIKey(),
-		GeminiModel:          getEnv("GEMINI_MODEL", "gemini-2.0-flash"),
+		GeminiModel:          resolveGeminiModel(),
 		HTTPWriteTimeoutSec:  getEnvInt("HTTP_WRITE_TIMEOUT_SEC", 120),
 		DatabasePoolMaxConns: getEnvInt("DATABASE_POOL_MAX_CONNS", 5),
 	}
@@ -49,6 +49,23 @@ func resolveGeminiAPIKey() string {
 		}
 	}
 	return ""
+}
+
+const defaultGeminiModel = "gemini-3.6-flash"
+
+func resolveGeminiModel() string {
+	model := strings.TrimSpace(os.Getenv("GEMINI_MODEL"))
+	switch model {
+	case "",
+		"gemini-2.0-flash",
+		"gemini-2.0-flash-001",
+		"gemini-2.0-flash-lite",
+		"gemini-1.5-flash",
+		"gemini-1.5-pro":
+		return defaultGeminiModel
+	default:
+		return model
+	}
 }
 
 // resolveDatabaseURL prefers DATABASE_URL, then common Neon/Vercel names.
