@@ -227,10 +227,19 @@ func ListShoppingLists(ctx context.Context, pool *pgxpool.Pool, userID string) (
 		list.Items = items
 		out = append(out, list)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	shared, err := ListSharedShoppingLists(ctx, pool, userID)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, shared...)
 	if out == nil {
 		out = []ShoppingList{}
 	}
-	return out, rows.Err()
+	return out, nil
 }
 
 func GetShoppingList(ctx context.Context, pool *pgxpool.Pool, userID, id string) (*ShoppingList, error) {

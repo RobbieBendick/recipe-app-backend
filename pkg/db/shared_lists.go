@@ -9,6 +9,49 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+func ListSharedShoppingLists(ctx context.Context, pool *pgxpool.Pool, userID string) ([]ShoppingList, error) {
+	rows, err := pool.Query(ctx, `
+		SELECT
+			sl.id, sl.title, sl.emoji, COALESCE(sl.recipe_counts, '{}'::jsonb), sl.created_at, sl.updated_at,
+			u.id, u.email, u.name, u.avatar_url, COALESCE(n.nickname, '')
+		FROM shopping_list_shares s
+		JOIN shopping_lists sl ON sl.id = s.list_id
+		JOIN users u ON u.id = CASE WHEN s.user_a = $1 THEN s.user_b ELSE s.user_a END
+		LEFT JOIN friend_nicknames n
+			ON n.user_id = $1 AND n.friend_user_id = u.id
+		WHERE s.user_a = $1 OR s.user_b = $1
+		ORDER BY sl.updated_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ShoppingList
+	for rows.Next() {
+		var list ShoppingList
+		var other PublicUser
+		if err := rows.Scan(
+			&list.ID, &list.Title, &list.Emoji, &list.RecipeCounts, &list.CreatedAt, &list.UpdatedAt,
+			&other.ID, &other.Email, &other.Name, &other.AvatarURL, &other.Nickname,
+		); err != nil {
+			return nil, err
+		}
+		normalizeRecipeCounts(&list)
+		items, err := listItems(ctx, pool, list.ID)
+		if err != nil {
+			return nil, err
+		}
+		list.Items = items
+		list.SharedWith = &other
+		out = append(out, list)
+	}
+	if out == nil {
+		out = []ShoppingList{}
+	}
+	return out, rows.Err()
+}
+
 func attachSharedWith(ctx context.Context, pool *pgxpool.Pool, viewerID string, list *ShoppingList) error {
 	if list == nil {
 		return nil
