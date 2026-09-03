@@ -28,6 +28,8 @@ var (
 	ErrFetchFailed  = errors.New("failed to fetch URL")
 	ErrNoRecipeData = errors.New("no recipe data found on page")
 	ErrAIFailed     = errors.New("AI extraction failed")
+	ErrInvalidImage = errors.New("invalid image")
+	ErrNoListItems  = errors.New("no shopping items found in image")
 )
 
 // Extracted is a best-effort recipe parsed from a web page.

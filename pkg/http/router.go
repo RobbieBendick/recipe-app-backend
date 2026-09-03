@@ -28,7 +28,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 		log.Printf("kroger credentials missing: price estimates disabled until KROGER_CLIENT_ID/SECRET are set")
 	}
 	if strings.TrimSpace(cfg.GeminiAPIKey) == "" {
-		log.Printf("gemini api key missing: recipe URL import and AI product matching disabled")
+		log.Printf("gemini api key missing: recipe URL import, shopping-list photo import, and AI product matching disabled")
 	}
 
 	api := &handlers.API{
@@ -88,6 +88,7 @@ func NewRouter(cfg config.Config, pool *pgxpool.Pool) http.Handler {
 			r.Route("/shopping-lists", func(r chi.Router) {
 				r.Get("/", api.ListShoppingLists)
 				r.Post("/", api.CreateShoppingList)
+				r.Post("/import-image", api.ImportShoppingListFromImage)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", api.GetShoppingList)
 					r.Put("/", api.UpdateShoppingList)

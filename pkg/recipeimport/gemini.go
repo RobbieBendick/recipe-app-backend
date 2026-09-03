@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	geminiTimeout   = 45 * time.Second
+	geminiTimeout    = 45 * time.Second
 	maxPageTextRunes = 48000
 )
 
@@ -38,7 +38,13 @@ type geminiContent struct {
 }
 
 type geminiPart struct {
-	Text string `json:"text"`
+	Text       string            `json:"text,omitempty"`
+	InlineData *geminiInlineData `json:"inline_data,omitempty"`
+}
+
+type geminiInlineData struct {
+	MimeType string `json:"mime_type"`
+	Data     string `json:"data"`
 }
 
 type geminiGenerationConfig struct {
