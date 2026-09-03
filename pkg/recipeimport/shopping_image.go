@@ -197,7 +197,9 @@ func shoppingImagePrompt() string {
 	var b strings.Builder
 	b.WriteString("Look at this photo and extract a shopping list.\n")
 	b.WriteString("The photo may be a handwritten or printed grocery list, a receipt, notes on a phone or whiteboard, or actual groceries / pantry items.\n")
-	b.WriteString("Return grocery items a shopper would buy. One item per array entry, including amounts when clearly shown.\n")
+	b.WriteString("Return grocery items a shopper would buy. One item per array entry.\n")
+	b.WriteString("Use the product name only (for example \"White Bread\"), not \"1 White Bread\".\n")
+	b.WriteString("Include an amount only when it is clearly written as a real measurement (2 lb, 12 oz, 6-pack). Never invent a count of 1.\n")
 	b.WriteString("Do not invent items that are not visible.\n")
 	b.WriteString("Skip prices, store names, ads, and decorative text unless they are product names.\n")
 	b.WriteString("If a heading or list title is visible, put it in title; otherwise use an empty string.\n")
